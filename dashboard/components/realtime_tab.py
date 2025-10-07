@@ -30,7 +30,7 @@ def create_metric_cards(weather_data):
     wind_dir = float(weather_data.get('wind_direction', 0))
     condition = weather_data.get('weather_desc', 'unknown')
     
-    # Xử lý thời gian
+    
     update_time = weather_data.get('datetime', datetime.now().isoformat())
     # Cắt chuỗi để chỉ lấy giờ (nếu định dạng chuẩn ISO) hoặc hiển thị nguyên
     time_display = update_time[-8:] if len(update_time) > 8 else update_time
