@@ -118,4 +118,3 @@ Dưới đây là các thách thức kỹ thuật nhóm đã gặp phải và gi
 * **Giải pháp:** Áp dụng cơ chế **Hot-swapping** bằng lệnh `kubectl cp` kết hợp với restart Pod Scheduler, giúp giảm thời gian deploy code từ 10 phút xuống còn 30 giây.
 
 ---
-**Đồ án học phần - HUST - 2025**
