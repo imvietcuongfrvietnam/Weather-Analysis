@@ -1,3 +1,3 @@
 # Team's Members:
 
-## Trinh Viet Cuong - 20224941
+## Nguyễn Việt Cường - 20224831
