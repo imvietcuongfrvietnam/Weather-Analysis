@@ -127,6 +127,6 @@ Quản lý vòng đời của Model:
     * Nếu chạy trên K8s: Dùng Service Name (ví dụ `weather-redis`).
     * Nếu chạy Local: Dùng `localhost` và Port-forwarding.
 
-3.  **Lỗi `AnalysisException: Path does not exist` khi chạy ML Job**:
+3.  **Lỗi `AnalysisException: Path does not exist` khi chạy ML Job**:  
     * Do Streaming Job chưa chạy hoặc chưa ghi đủ dữ liệu xuống MinIO. Hãy chạy Streaming Job trước ít nhất 5 phút để có dữ liệu.
 

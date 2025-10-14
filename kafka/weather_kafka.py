@@ -88,6 +88,7 @@ def run_producer():
     finally:
         producer.close()
         print("🔌 Đã đóng kết nối.")
+        
 
 if __name__ == "__main__":
     run_producer()

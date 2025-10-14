@@ -7,6 +7,7 @@ default_args = {
     'owner': 'airflow',
 }
 
+
 with DAG(
     'test_system_connectivity',
     default_args=default_args,

@@ -9,7 +9,7 @@ default_args = {
 
 with DAG(
     'weather_system_init',
-    default_args=default_args,
+    default_args=default_args,   
     description='Khởi tạo bảng Database và kích hoạt Streaming',
     schedule_interval='@once',
     start_date=days_ago(1),
