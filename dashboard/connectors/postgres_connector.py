@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     import config
 except ImportError:
-    # Fallback cấu hình (Đã cập nhật khớp với hệ thống chuẩn)
+    # Fallback   cấu hình (Đã cập nhật khớp với hệ thống chuẩn)
     class Config:
         POSTGRES_HOST = "localhost" # Hoặc weather-postgresql... nếu chạy trong pod
         POSTGRES_PORT = "5432"
