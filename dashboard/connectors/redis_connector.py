@@ -10,13 +10,13 @@ import os
 from typing import Dict, Optional, List
 
 # --- SETUP IMPORT CONFIG ---
-# Thêm thư mục cha (dashboard/) vào sys.path để import config.py
+# Thêm thư mục cha  vào sys.path  để import config.py
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     import config
 except ImportError:
-    # Fallback nếu chạy trực tiếp file này mà không qua app.py
+    # Fallback cấu hình
     class Config:
         REDIS_HOST = "localhost"
         REDIS_PORT = 6379
