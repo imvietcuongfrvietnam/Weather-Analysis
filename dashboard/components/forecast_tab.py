@@ -22,12 +22,12 @@ def create_forecast_chart(df, feature_name, predicted_col, actual_col, unit=""):
     """Tạo biểu đồ so sánh Thực tế vs Dự báo (Actual vs Predicted)"""
     fig = go.Figure()
     
-    # Sắp xếp theo thời gian để vẽ liền mạch
+        # Sắp xếp theo thời gian
     if 'datetime' in df.columns:
         df = df.sort_values('datetime')
     
-    # Vẽ đường dữ liệu thực tế (Actual) - Màu Xanh
-    # Plotly sẽ tự động ngắt nét khi gặp giá trị NULL (dữ liệu tương lai)
+    # Vẽ đường dữ liệu thực tế (Actual) 
+    # Plotly sẽ tự động ngắt nét khi gặp giá trị NULL (trong trường hợp dữ liệu tương lai)
     if actual_col in df.columns:
         # Lọc bỏ bớt điểm null để check xem có dữ liệu không
         if df[actual_col].notna().any():
