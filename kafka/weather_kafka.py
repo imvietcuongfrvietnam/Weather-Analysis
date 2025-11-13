@@ -44,8 +44,11 @@ def run_producer():
     # Kiểm tra file dữ liệu
     if not os.path.exists(DATA_FILE):
         print(f"❌ Lỗi: Không tìm thấy file {DATA_FILE}.")
+
         print(f"📍 Bạn đang chạy script từ: {os.getcwd()}")
+        
         return
+    
 
     try:
         with open(DATA_FILE, mode='r', encoding='utf-8') as f:
@@ -83,8 +86,10 @@ def run_producer():
 
     except KeyboardInterrupt:
         print("\n🛑 Đã dừng Producer.")
+
     except Exception as e:
         print(f"❌ Lỗi: {e}")
+
     finally:
         producer.close()
         print("🔌 Đã đóng kết nối.")
@@ -94,119 +99,3 @@ if __name__ == "__main__":
     run_producer()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
