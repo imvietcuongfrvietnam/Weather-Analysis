@@ -17,12 +17,12 @@ from connectors.redis_connector import RedisConnector
 import config
 
 def create_metric_cards(weather_data):
-    """Tạo các thẻ thông số cho thời tiết hiện tại"""
+    """Tạo thẻ số liệu (Metric Cards) hiển thị dữ liệu real-time"""
     if not weather_data:
-        st.warning("⚠️ No real-time data available from Redis")
+        st.warning("⚠️ No real-time  data available from Redis")
         return
     
-    # 1. Lấy dữ liệu theo đúng danh sách cột bạn cung cấp
+    # 1. Lấy dữ liệu từ dictionary
     temp = float(weather_data.get('temperature', 0))
     humidity = float(weather_data.get('humidity', 0))
     pressure = float(weather_data.get('pressure', 0))
@@ -35,7 +35,7 @@ def create_metric_cards(weather_data):
     # Cắt chuỗi để chỉ lấy giờ (nếu định dạng chuẩn ISO) hoặc hiển thị nguyên
     time_display = update_time[-8:] if len(update_time) > 8 else update_time
 
-    # 2. Hiển thị hàng 1: Các chỉ số cơ bản (4 cột)
+   
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric(label="🌡️ Temperature", value=f"{temp:.1f}°C")
