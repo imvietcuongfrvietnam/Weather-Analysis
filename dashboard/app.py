@@ -22,7 +22,7 @@ except ImportError:
         DASHBOARD_REFRESH_SECONDS = 10
     config = Config()
 
-# Fallback nếu config thiếu biến
+
 if not hasattr(config, 'DASHBOARD_TITLE'): config.DASHBOARD_TITLE = "Weather Forecast Dashboard"
 if not hasattr(config, 'REDIS_HOST'): config.REDIS_HOST = "weather-redis"
 if not hasattr(config, 'POSTGRES_HOST'): config.POSTGRES_HOST = "weather-postgresql"
@@ -31,7 +31,7 @@ if not hasattr(config, 'DASHBOARD_REFRESH_SECONDS'): config.DASHBOARD_REFRESH_SE
 from components.realtime_tab import show_realtime_tab
 from components.forecast_tab import show_forecast_tab
 
-# Page configuration
+# Page configuration title
 st.set_page_config(
     page_title=config.DASHBOARD_TITLE,
     page_icon="🌦️",
@@ -63,7 +63,7 @@ st.markdown("""
 # Main Header
 st.markdown(f'<div class="main-header">{config.DASHBOARD_TITLE}</div>', unsafe_allow_html=True)
 
-# --- SIDEBAR SETUP ---
+# --- SIDEBAR SETTINGS ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/4052/4052984.png", width=80)
     st.title("⚙️ Control Panel")
