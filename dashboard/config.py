@@ -21,14 +21,12 @@ REDIS_KEY_PREFIX = os.getenv("REDIS_KEY_PREFIX", "weather:current")
 # ==========================================
 # POSTGRESQL CONFIGURATION
 # ==========================================
-# Sửa lại cho đúng với file deploy/postgre.yaml
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_DB = os.getenv("POSTGRES_DB", "weather_db")             # Khớp YAML
-POSTGRES_USER = os.getenv("POSTGRES_USER", "weather_user")       # Khớp YAML
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "weather_pass") # Khớp YAML
+POSTGRES_DB = os.getenv("POSTGRES_DB", "weather_db")             # Khớp YAML file
+POSTGRES_USER = os.getenv("POSTGRES_USER", "weather_user")       # Khớp YAML file
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "weather_pass") # Khớp YAML file
 POSTGRES_TABLE = os.getenv("POSTGRES_TABLE", "weather_predictions")
-# ==========================================
 # DASHBOARD SETTINGS
 # ==========================================
 DASHBOARD_REFRESH_SECONDS = int(os.getenv("DASHBOARD_REFRESH_SECONDS", "10"))
