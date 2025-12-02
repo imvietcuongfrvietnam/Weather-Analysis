@@ -32,5 +32,10 @@ Thumbs.db
 
 # Project specific
 fake_output/
+output/
+data/*.csv
+data/*.parquet
+data/*.json
+!data/.gitkeep
 *.exe
 *.msi

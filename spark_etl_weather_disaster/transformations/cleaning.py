@@ -13,6 +13,12 @@ class DataCleaner:
         """Clean weather data"""
         print("🧹 Cleaning weather data...")
         
+        # Cast numeric columns from string to proper types (when reading from CSV)
+        numeric_cols = ["temperature", "humidity", "pressure", "wind_speed", "rain_1h", "snow_1h"]
+        for col_name in numeric_cols:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, col(col_name).cast("double"))
+        
         # Remove nulls in critical columns
         df = df.dropna(subset=["datetime", "temperature"])
         
@@ -39,6 +45,12 @@ class DataCleaner:
         """Clean 311 service requests"""
         print("🧹 Cleaning 311 data...")
         
+        # Cast numeric columns from string to proper types
+        numeric_cols = ["latitude", "longitude"]
+        for col_name in numeric_cols:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, col(col_name).cast("double"))
+        
         # Remove nulls
         df = df.dropna(subset=["unique_key", "created_date"])
         
@@ -62,6 +74,20 @@ class DataCleaner:
     def clean_taxi_data(df: DataFrame) -> DataFrame:
         """Clean taxi trip data"""
         print("🧹 Cleaning taxi data...")
+        
+        # Cast numeric columns from string to proper types
+        numeric_cols = ["trip_distance", "fare_amount", "passenger_count", "pickup_longitude", 
+                       "pickup_latitude", "dropoff_longitude", "dropoff_latitude", 
+                       "extra", "mta_tax", "tip_amount", "tolls_amount", "total_amount"]
+        for col_name in numeric_cols:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, col(col_name).cast("double"))
+        
+        # Cast integer columns
+        int_cols = ["VendorID", "passenger_count", "RatecodeID", "payment_type"]
+        for col_name in int_cols:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, col(col_name).cast("int"))
         
         # Remove nulls
         df = df.dropna(subset=["tpep_pickup_datetime", "tpep_dropoff_datetime"])
@@ -90,21 +116,35 @@ class DataCleaner:
         """Clean collision data"""
         print("🧹 Cleaning collision data...")
         
-        # Remove nulls
-        df = df.dropna(subset=["crash_date", "crash_time"])
+        # Cast numeric columns from string to proper types
+        numeric_cols = ["latitude", "longitude"]
+        for col_name in numeric_cols:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, col(col_name).cast("double"))
         
-        # Clean borough names
-        df = df.withColumn("borough", upper(trim(col("borough"))))
-        
-        # Ensure injury/death counts are non-negative
+        # Cast integer columns for injury/death counts
         injury_cols = [
             "number_of_persons_injured", "number_of_persons_killed",
             "number_of_pedestrians_injured", "number_of_cyclist_injured",
             "number_of_motorist_injured"
         ]
-        
         for col_name in injury_cols:
-            df = df.withColumn(col_name, when(col(col_name) < 0, 0).otherwise(col(col_name)))
+            if col_name in df.columns:
+                df = df.withColumn(col_name, col(col_name).cast("int"))
+        
+        # Remove nulls (now check for crash_datetime since we merged date+time in generate_data.py)
+        if "crash_datetime" in df.columns:
+            df = df.dropna(subset=["crash_datetime"])
+        else:
+            df = df.dropna(subset=["crash_date", "crash_time"])
+        
+        # Clean borough names
+        df = df.withColumn("borough", upper(trim(col("borough"))))
+        
+        # Ensure injury/death counts are non-negative
+        for col_name in injury_cols:
+            if col_name in df.columns:
+                df = df.withColumn(col_name, when(col(col_name) < 0, 0).otherwise(col(col_name)))
         
         # Validate coordinates
         df = df.filter(
