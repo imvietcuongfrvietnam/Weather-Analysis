@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode
+spec:
+  ports:
+    - port: 9870
+      name: web
+    - port: 9000
+      name: hdfs
+  selector:
+    app: namenode
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: namenode
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: namenode
+  template:
+    metadata:
+      labels:
+        app: namenode
+    spec:
+      containers:
+      - name: namenode
+        image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+        envFrom:
+        - configMapRef:
+            name: hadoop-config
+        # Không cần override gì ở đây nữa
+        ports:
+        - containerPort: 9870
+        - containerPort: 9000
+        volumeMounts:
+        - name: namenode-data
+          mountPath: /hadoop/dfs/name
+      volumes:
+      - name: namenode-data
+        emptyDir: {}
