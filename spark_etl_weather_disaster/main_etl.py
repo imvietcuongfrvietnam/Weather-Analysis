@@ -9,6 +9,10 @@ from pyspark.sql import SparkSession
 import sys
 import os
 
+# Configure Python executable for Spark
+os.environ['PYSPARK_PYTHON'] = sys.executable
+os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
+
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -26,6 +30,8 @@ def create_spark_session():
         .master("local[*]") \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.driver.memory", "4g") \
+        .config("spark.driver.host", "localhost") \
+        .config("spark.driver.bindAddress", "127.0.0.1") \
         .getOrCreate()
     
     spark.sparkContext.setLogLevel("WARN")

@@ -152,11 +152,11 @@ class DataEnricher:
         print("✨ Adding ML features...")
         
         # Time-based features
-        df = df.withColumn("is_weekend", dayofweek(col("datetime")).isin([1, 7]).cast("int"))
+        df = df.withColumn("is_weekend", when(dayofweek(col("datetime")).isin([1, 7]), 1).otherwise(0))
         df = df.withColumn("is_rush_hour", 
-                          ((hour(col("datetime")) >= 7) & (hour(col("datetime")) <= 9)) |
-                          ((hour(col("datetime")) >= 17) & (hour(col("datetime")) <= 19))
-                          ).cast("int")
+                          when(((hour(col("datetime")) >= 7) & (hour(col("datetime")) <= 9)) |
+                               ((hour(col("datetime")) >= 17) & (hour(col("datetime")) <= 19)), 1).otherwise(0)
+                          )
         
         df = df.withColumn("month", month(col("datetime")))
         df = df.withColumn("season",

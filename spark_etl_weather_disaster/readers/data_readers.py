@@ -8,6 +8,7 @@ from pyspark.sql.functions import *
 from schemas.data_schemas import *
 from datetime import datetime, timedelta
 import random
+import builtins  # For Python's built-in round function
 
 class FakeDataReader:
     """
@@ -122,13 +123,13 @@ class FakeDataReader:
                 "dropoff_longitude": -73.98 + random.uniform(-0.1, 0.1),
                 "dropoff_latitude": 40.75 + random.uniform(-0.1, 0.1),
                 "payment_type": random.choice([1, 2]),
-                "fare_amount": random.uniform(5, 50),
+                "fare_amount": builtins.round(random.uniform(5, 50), 2),
                 "extra": 0.5,
                 "mta_tax": 0.5,
-                "tip_amount": random.uniform(0, 10),
-                "tolls_amount": random.uniform(0, 5) if random.random() > 0.8 else 0,
+                "tip_amount": builtins.round(random.uniform(0, 10), 2),
+                "tolls_amount": builtins.round(random.uniform(0, 5), 2) if random.random() > 0.8 else 0.0,
                 "improvement_surcharge": 0.3,
-                "total_amount": random.uniform(6, 70),
+                "total_amount": builtins.round(random.uniform(6, 70), 2),
             }
             data.append(record)
         
