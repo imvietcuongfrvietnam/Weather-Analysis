@@ -8,7 +8,7 @@ from hdfs import InsecureClient
 
 # --- CẤU HÌNH CHUNG ---
 BOOTSTRAP_SERVERS = ['localhost:9092']
-HDFS_URL = 'http://localhost:9870' # Nhớ port-forward trước khi chạy
+HDFS_URL = 'http://localhost:30070' # Nhớ port-forward trước khi chạy
 HDFS_USER = 'root'
 
 # =============================================================================
