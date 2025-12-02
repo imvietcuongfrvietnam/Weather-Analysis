@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: datanode
+spec:
+  serviceName: "datanode"
+  replicas: 2
+  selector:
+    matchLabels:
+      app: datanode
+  template:
+    metadata:
+      labels:
+        app: datanode
+    spec:
+      containers:
+      - name: datanode
+        image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+        envFrom:
+        - configMapRef:
+            name: hadoop-config
+        # --- THÊM LẠI BIẾN CHỜ VÀO RIÊNG ĐÂY ---
+        env:
+        - name: SERVICE_PRECONDITION
+          value: "namenode:9870"
+        # ----------------------------------------
+        volumeMounts:
+        - name: datanode-data
+          mountPath: /hadoop/dfs/data
+  volumeClaimTemplates:
+  - metadata:
+      name: datanode-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
