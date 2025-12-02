@@ -19,11 +19,20 @@ spec:
         envFrom:
         - configMapRef:
             name: hadoop-config
-        # --- THÊM LẠI BIẾN CHỜ VÀO RIÊNG ĐÂY ---
+        # --- THÊM CÁC BIẾN MÔI TRƯỜNG ---
         env:
+        # 1. Precondition (Đợi Namenode)
         - name: SERVICE_PRECONDITION
           value: "namenode:9870"
-        # ----------------------------------------
+        
+        # 2. BUỘC DATANODE ĐĂNG KÝ BẰNG TÊN POD (datanode-0)
+        # Fix lỗi Hostname Check (DFS_CONF_dfs_datanode_hostname)
+        - name: DFS_CONF_dfs_datanode_hostname
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        # ---------------------------------
+        
         volumeMounts:
         - name: datanode-data
           mountPath: /hadoop/dfs/data

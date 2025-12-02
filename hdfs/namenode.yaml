@@ -3,14 +3,18 @@ kind: Service
 metadata:
   name: namenode
 spec:
+  type: NodePort  # <--- Đã đổi thành NodePort
   ports:
     - port: 9870
       name: web
+      nodePort: 30070 # <--- Cố định cổng này để bạn dễ truy cập từ ngoài
+      targetPort: 9870
     - port: 9000
       name: hdfs
+      # Cổng RPC 9000 không cần NodePort cố định cũng được, 
+      # hoặc bạn có thể để 30090 nếu muốn
   selector:
     app: namenode
-  type: ClusterIP
 
 ---
 apiVersion: apps/v1
@@ -33,7 +37,9 @@ spec:
         envFrom:
         - configMapRef:
             name: hadoop-config
-        # Không cần override gì ở đây nữa
+        env:
+        - name: SERVICE_PRECONDITION
+          value: ""
         ports:
         - containerPort: 9870
         - containerPort: 9000
