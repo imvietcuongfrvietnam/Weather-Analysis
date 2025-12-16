@@ -41,8 +41,11 @@ def retry_on_failure(max_retries=3, delay=5, backoff=2, exceptions=(Exception,))
                     
                     # Retry with backoff
                     print(f"   ⚠️  Attempt {attempt + 1}/{max_retries} failed: {str(e)}")
+
                     print(f"   🔄 Retrying in {current_delay} seconds...")
+
                     time.sleep(current_delay)
+                    
                     current_delay *= backoff
             
             # Should never reach here, but just in case
@@ -179,3 +182,15 @@ def test_spark_kafka_connection(spark, bootstrap_servers: str, topic: str = None
         print(f"      2. Bootstrap servers address is correct")
         print(f"      3. Network connectivity")
         return False
+    
+
+
+
+
+
+
+
+
+
+
+
