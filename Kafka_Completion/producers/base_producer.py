@@ -1,8 +1,13 @@
 import csv
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Iterable, Dict, Any, Optional
+
+# Thêm thư mục gốc vào PYTHONPATH để có thể import config
+root_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(root_dir))
 
 from kafka import KafkaProducer
 
@@ -36,6 +41,7 @@ class CsvKafkaProducer:
         self.producer = KafkaProducer(
             bootstrap_servers=BOOTSTRAP_SERVERS,
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            api_version=(0, 10, 1)  # Chỉ định API version tương thích
         )
 
     def _read_csv(self) -> Iterable[Dict[str, Any]]:
