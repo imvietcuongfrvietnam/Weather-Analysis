@@ -221,3 +221,148 @@ class DataWriter:
             print(f"   💡 Make sure Spark is configured with S3A connector")
             print(f"   💡 Falling back to Python MinIO client")
             self._write_to_minio(df, dataset_name, folder)
+    
+    # ============================================
+    # Streaming Write Methods (for Kafka streaming mode)
+    # ============================================
+    
+    def write_cleaned_data_streaming(self, df: DataFrame, dataset_name: str, checkpoint_location: str = None):
+        """
+        Write streaming cleaned data to configured destination
+        
+        Args:
+            df: Streaming DataFrame to write
+            dataset_name: Name of dataset (e.g., "weather", "311_requests")
+            checkpoint_location: Path for checkpoint (required for streaming)
+        
+        Returns:
+            StreamingQuery object
+        """
+        print(f"\n⚡ Writing streaming {dataset_name} data to {self.output_type}...")
+        
+        # Auto-generate checkpoint location if not provided
+        if not checkpoint_location:
+            checkpoint_location = f"./checkpoints/cleaned/{dataset_name}"
+        
+        if self.output_type == "json":
+            return self._write_streaming_to_json(df, dataset_name, checkpoint_location, folder="cleaned")
+        elif self.output_type == "minio":
+            return self._write_streaming_to_minio(df, dataset_name, checkpoint_location, folder="cleaned")
+        else:
+            raise ValueError(f"Unknown output type: {self.output_type}")
+    
+    def write_enriched_data_streaming(self, df: DataFrame, dataset_name: str = "integrated", checkpoint_location: str = None):
+        """
+        Write streaming enriched/integrated data
+        
+        Args:
+            df: Streaming DataFrame
+            dataset_name: Name for output (default: "integrated")
+            checkpoint_location: Path for checkpoint
+            
+        Returns:
+            StreamingQuery object
+        """
+        print(f"\n⚡ Writing streaming final {dataset_name} data to {self.output_type}...")
+        
+        # Auto-generate checkpoint location if not provided
+        if not checkpoint_location:
+            checkpoint_location = f"./checkpoints/enriched/{dataset_name}"
+        
+        if self.output_type == "json":
+            return self._write_streaming_to_json(df, f"{dataset_name}_final", checkpoint_location, folder="enriched")
+        elif self.output_type == "minio":
+            return self._write_streaming_to_minio(df, dataset_name, checkpoint_location, folder="enriched")
+        else:
+            raise ValueError(f"Unknown output type: {self.output_type}")
+    
+    def _write_streaming_to_json(self, df: DataFrame, dataset_name: str, checkpoint_location: str, folder: str = ""):
+        """
+        Write streaming data to JSON files
+        
+        Args:
+            df: Streaming DataFrame
+            dataset_name: Name of dataset
+            checkpoint_location: Checkpoint path for fault tolerance
+            folder: Subfolder in output directory
+            
+        Returns:
+            StreamingQuery object
+        """
+        # Create output directory
+        if folder:
+            output_folder = os.path.join(self.output_dir, folder, dataset_name)
+        else:
+            output_folder = os.path.join(self.output_dir, dataset_name)
+        
+        os.makedirs(output_folder, exist_ok=True)
+        os.makedirs(checkpoint_location, exist_ok=True)
+        
+        try:
+            # Start streaming query
+            query = df.writeStream \
+                .outputMode("append") \
+                .format("json") \
+                .option("path", output_folder) \
+                .option("checkpointLocation", checkpoint_location) \
+                .start()
+            
+            print(f"   ✅ Streaming query started!")
+            print(f"   📁 Output: {output_folder}")
+            print(f"   🔖 Checkpoint: {checkpoint_location}")
+            print(f"   📊 Query ID: {query.id}")
+            print(f"   💡 Use query.status to monitor progress")
+            
+            return query
+            
+        except Exception as e:
+            print(f"   ❌ Failed to start streaming query: {e}")
+            raise
+    
+    def _write_streaming_to_minio(self, df: DataFrame, dataset_name: str, checkpoint_location: str, folder: str = "cleaned"):
+        """
+        Write streaming data to MinIO using Spark S3A
+        
+        Args:
+            df: Streaming DataFrame
+            dataset_name: Name of dataset
+            checkpoint_location: Checkpoint path
+            folder: Folder in bucket (cleaned, enriched, etc.)
+            
+        Returns:
+            StreamingQuery object
+        """
+        if not self.minio_client:
+            print(f"   ⚠️  MinIO client not initialized. Falling back to JSON.")
+            return self._write_streaming_to_json(df, dataset_name, checkpoint_location, folder)
+        
+        from minio_config import MINIO_BUCKET
+        
+        # S3A path for streaming write
+        s3_path = f"s3a://{MINIO_BUCKET}/{folder}/{dataset_name}"
+        
+        os.makedirs(checkpoint_location, exist_ok=True)
+        
+        try:
+            # Start streaming query to MinIO via S3A
+            query = df.writeStream \
+                .outputMode("append") \
+                .format("parquet") \
+                .option("path", s3_path) \
+                .option("checkpointLocation", checkpoint_location) \
+                .start()
+            
+            print(f"   ✅ Streaming query to MinIO started!")
+            print(f"   📦 Bucket: {MINIO_BUCKET}")
+            print(f"   📁 Path: {folder}/{dataset_name}")
+            print(f"   🔖 Checkpoint: {checkpoint_location}")
+            print(f"   📊 Query ID: {query.id}")
+            print(f"   🔗 S3 URI: {s3_path}")
+            
+            return query
+            
+        except Exception as e:
+            print(f"   ❌ Streaming to MinIO failed: {e}")
+            print(f"   💡 Falling back to JSON streaming")
+            return self._write_streaming_to_json(df, dataset_name, checkpoint_location, folder)
+

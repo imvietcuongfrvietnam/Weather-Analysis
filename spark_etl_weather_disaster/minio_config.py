@@ -110,3 +110,52 @@ if __name__ == "__main__":
     print("Example paths:")
     print(f"  Cleaned weather: {get_minio_path('cleaned', 'weather')}")
     print(f"  Enriched data:   {get_minio_path('enriched', 'integrated')}")
+
+
+def validate_config(test_connection: bool = False):
+    """
+    Validate MinIO configuration
+    
+    Args:
+        test_connection: If True, test actual connection to MinIO server
+        
+    Returns:
+        bool: True if valid, raises ValueError if invalid
+    """
+    print("\n🔍 Validating MinIO Configuration...")
+    
+    # Check required fields
+    if not MINIO_ENDPOINT:
+        raise ValueError("MINIO_ENDPOINT is not set!")
+    
+    if not MINIO_ACCESS_KEY:
+        raise ValueError("MINIO_ACCESS_KEY is not set!")
+    
+    if not MINIO_SECRET_KEY:
+        raise ValueError("MINIO_SECRET_KEY is not set!")
+    
+    if not MINIO_BUCKET:
+        raise ValueError("MINIO_BUCKET is not set!")
+    
+    # Warn if using defaults
+    if "localhost" in MINIO_ENDPOINT.lower():
+        print("   ⚠️  WARNING: Using localhost MinIO server")
+        print("      Make sure MinIO is running locally or update config for production")
+    
+    if MINIO_ACCESS_KEY == "minioadmin":
+        print("   ⚠️  WARNING: Using default MinIO credentials (minioadmin)")
+        print("      Change these for production!")
+    
+    print("   ✅ Configuration validation passed!")
+    
+    # Optional: Test actual connection
+    if test_connection:
+        try:
+            from connection_utils import validate_minio_connection
+            if not validate_minio_connection(MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_SECURE):
+                print("   ⚠️  Connection test failed but continuing anyway")
+        except ImportError:
+            print("   💡 connection_utils not found, skipping connection test")
+    
+    print_config()
+    return True

@@ -23,6 +23,12 @@ from transformations.normalization import DataNormalizer
 from transformations.enrichment import DataEnricher
 from writers.data_writers import FakeDataWriter  # Keep for legacy output
 from writers.real_data_writer import DataWriter  # NEW: Use real writer
+from streaming_helpers import (  # NEW: Streaming mode helpers
+    is_streaming,
+    show_data_smart,
+    count_data_smart,
+    stop_all_streaming_queries
+)
 
 
 def create_spark_session():
@@ -76,9 +82,14 @@ def run_etl_pipeline():
     # ===========================
     spark = create_spark_session()
     
-    # Choose data source: "json" (from files) or "kafka" (streaming)
-    # For now, use "json" to read from pre-generated data files
-    reader = DataReader(spark, source_type="json")
+    # Choose data source: "json" (from files) or "kafka" (from Kafka)
+    # Choose Kafka mode: "batch" (micro-batches, easier) or "streaming" (real-time)
+    # 
+    # BATCH MODE:    Kafka → read() → DataFrame → count/show/write (compatible)
+    # STREAMING MODE: Kafka → readStream() → DataFrame → writeStream (advanced)
+    #
+    reader = DataReader(spark, source_type="json", kafka_mode="batch")  
+    # To use Kafka: source_type="kafka", kafka_mode="batch" hoặc "streaming"
     
     cleaner = DataCleaner()
     normalizer = DataNormalizer()
@@ -87,6 +98,11 @@ def run_etl_pipeline():
     
     print("\n✅ Spark session initialized")
     print(f"📂 Data source: {reader.source_type}")
+    if reader.source_type == "kafka":
+        print(f"⚡ Kafka mode: {reader.kafka_mode.upper()}")
+    
+    # Detect if we're in streaming mode
+    is_streaming_mode = (reader.source_type == "kafka" and reader.kafka_mode == "streaming")
     
     # ===========================
     # 2. READ DATA FROM FILES
@@ -109,10 +125,10 @@ def run_etl_pipeline():
     collision_df = reader.read_collisions()
     
     print("\n✅ Data reading complete!")
-    print(f"   - Weather: {weather_df.count()} records")
-    print(f"   - 311 Requests: {service_311_df.count()} records")
-    print(f"   - Taxi Trips: {taxi_df.count()} records")
-    print(f"   - Collisions: {collision_df.count()} records")
+    print(f"   - Weather: {count_data_smart(weather_df)} records")
+    print(f"   - 311 Requests: {count_data_smart(service_311_df)} records")
+    print(f"   - Taxi Trips: {count_data_smart(taxi_df)} records")
+    print(f"   - Collisions: {count_data_smart(collision_df)} records")
     
     # ===========================
     # 3. CLEAN DATA
@@ -121,22 +137,28 @@ def run_etl_pipeline():
     print("🧹 STEP 2: CLEANING DATA")
     print("="*80)
     
-    # Show BEFORE cleaning
+    # Show BEFORE cleaning (streaming-aware)
     print("\n📊 WEATHER DATA - BEFORE CLEANING:")
-    print(f"   Total records: {weather_df.count()}")
-    print(f"   Records with nulls: {weather_df.filter(col('temperature').isNull() | col('city').isNull()).count()}")
-    weather_df.select("datetime", "city", "temperature", "humidity", "pressure").show(5, truncate=False)
+    if not is_streaming_mode:
+        print(f"   Total records: {weather_df.count()}")
+        print(f"   Records with nulls: {weather_df.filter(col('temperature').isNull() | col('city').isNull()).count()}")
+        weather_df.select("datetime", "city", "temperature", "humidity", "pressure").show(5, truncate=False)
+    else:
+        print(f"   ⚡ Streaming mode - skipping count and show")
     
     weather_clean = cleaner.clean_weather_data(weather_df)
     service_311_clean = cleaner.clean_311_data(service_311_df)
     taxi_clean = cleaner.clean_taxi_data(taxi_df)
     collision_clean = cleaner.clean_collision_data(collision_df)
     
-    # Show AFTER cleaning
+    # Show AFTER cleaning (streaming-aware)
     print("\n📊 WEATHER DATA - AFTER CLEANING:")
-    print(f"   Total records: {weather_clean.count()}")
-    print(f"   Records with nulls: {weather_clean.filter(col('temperature').isNull() | col('city').isNull()).count()}")
-    weather_clean.select("datetime", "city", "temperature", "humidity", "pressure").show(5, truncate=False)
+    if not is_streaming_mode:
+        print(f"   Total records: {weather_clean.count()}")
+        print(f"   Records with nulls: {weather_clean.filter(col('temperature').isNull() | col('city').isNull()).count()}")
+        weather_clean.select("datetime", "city", "temperature", "humidity", "pressure").show(5, truncate=False)
+    else:
+        print(f"   ⚡ Streaming mode - skipping count and show")
     
     print("\n✅ Data cleaning complete!")
     
@@ -169,18 +191,24 @@ def run_etl_pipeline():
     print("📏 STEP 3: NORMALIZING DATA")
     print("="*80)
     
-    # Show BEFORE normalization (temperature in Kelvin)
+    # Show BEFORE normalization (streaming-aware)
     print("\n📊 WEATHER DATA - BEFORE NORMALIZATION:")
-    weather_clean.select("datetime", "city", "temperature", "wind_speed").show(3, truncate=False)
+    if not is_streaming_mode:
+        weather_clean.select("datetime", "city", "temperature", "wind_speed").show(3, truncate=False)
+    else:
+        print(f"   ⚡ Streaming mode - skipping show")
     
     weather_norm = normalizer.normalize_weather_data(weather_clean)
     service_311_norm = normalizer.normalize_311_data(service_311_clean)
     taxi_norm = normalizer.normalize_taxi_data(taxi_clean)
     collision_norm = normalizer.normalize_collision_data(collision_clean)
     
-    # Show AFTER normalization (temperature in Celsius & Fahrenheit)
+    # Show AFTER normalization (streaming-aware)
     print("\n📊 WEATHER DATA - AFTER NORMALIZATION:")
-    weather_norm.select("datetime", "city", "temp_celsius", "temp_fahrenheit", "wind_speed_kmh").show(3, truncate=False)
+    if not is_streaming_mode:
+        weather_norm.select("datetime", "city", "temp_celsius", "temp_fahrenheit", "wind_speed_kmh").show(3, truncate=False)
+    else:
+        print(f"   ⚡ Streaming mode - skipping show")
     
     print("\n✅ Data normalization complete!")
     
@@ -191,17 +219,23 @@ def run_etl_pipeline():
     print("✨ STEP 4: ENRICHING DATA")
     print("="*80)
     
-    # Show BEFORE enrichment
+    # Show BEFORE enrichment (streaming-aware)
     print("\n📊 WEATHER DATA - BEFORE ENRICHMENT:")
     print(f"   Number of columns: {len(weather_norm.columns)}")
-    print(f"   Columns: {', '.join(weather_norm.columns[:10])}...")
+    if not is_streaming_mode:
+        print(f"   Columns: {', '.join(weather_norm.columns[:10])}...")
+    else:
+        print(f"   ⚡ Streaming mode")
     
     # Add disaster risk scores to weather
     weather_enriched = enricher.enrich_with_disaster_risk(weather_norm)
     
-    # Show AFTER adding disaster risk
+    # Show AFTER adding disaster risk (streaming-aware)
     print("\n📊 WEATHER DATA - AFTER DISASTER RISK CALCULATION:")
-    weather_enriched.select("datetime", "city", "weather_condition", "disaster_risk_score", "emergency_level").show(5, truncate=False)
+    if not is_streaming_mode:
+        weather_enriched.select("datetime", "city", "weather_condition", "disaster_risk_score", "emergency_level").show(5, truncate=False)
+    else:
+        print(f"   ⚡ Streaming mode - skipping show")
     
     # Add traffic impact (join weather + taxi + collision)
     integrated_df = enricher.enrich_with_traffic_impact(
@@ -212,7 +246,10 @@ def run_etl_pipeline():
     )
     
     print("\n📊 INTEGRATED DATA - AFTER TRAFFIC IMPACT:")
-    integrated_df.select("datetime", "weather_condition", "trip_count", "collision_count", "traffic_impact_score").show(5, truncate=False)
+    if not is_streaming_mode:
+        integrated_df.select("datetime", "weather_condition", "trip_count", "collision_count", "traffic_impact_score").show(5, truncate=False)
+    else:
+        print(f"   ⚡ Streaming mode - skipping show")
     
     # Add ML features
     final_df = enricher.add_ml_features(integrated_df)
@@ -259,28 +296,35 @@ def run_etl_pipeline():
     print("   ✅ Saved to: ./fake_output/stage_3_enriched_weather/")
     
     # ===========================
-    # 8. STATISTICS & SUMMARY
+    # 8. STATISTICS & SUMMARY (streaming-aware)
     # ===========================
     print("\n" + "="*80)
     print("📊 STEP 7: SUMMARY STATISTICS")
     print("="*80)
     
-    print("\n🌦️  Weather Statistics:")
-    final_df.groupBy("weather_condition").count().show()
-    
-    print("\n⚠️  Emergency Level Distribution:")
-    final_df.groupBy("emergency_level").count().show()
-    
-    print("\n🚗 Traffic Impact by Weather:")
-    final_df.groupBy("weather_condition") \
-        .agg({
-            "trip_count": "avg",
-            "collision_count": "avg",
-            "traffic_impact_score": "avg"
-        }).show()
-    
-    print("\n📈 Disaster Risk Score Stats:")
-    final_df.select("disaster_risk_score").describe().show()
+    if not is_streaming_mode:
+        # BATCH MODE: Show statistics
+        print("\n🌦️  Weather Statistics:")
+        final_df.groupBy("weather_condition").count().show()
+        
+        print("\n⚠️  Emergency Level Distribution:")
+        final_df.groupBy("emergency_level").count().show()
+        
+        print("\n🚗 Traffic Impact by Weather:")
+        final_df.groupBy("weather_condition") \
+            .agg({
+                "trip_count": "avg",
+                "collision_count": "avg",
+                "traffic_impact_score": "avg"
+            }).show()
+        
+        print("\n📈 Disaster Risk Score Stats:")
+        final_df.select("disaster_risk_score").describe().show()
+    else:
+        # STREAMING MODE: Statistics will be computed in streaming query output
+        print("\n⚡ STREAMING MODE:")
+        print("   Statistics will be available in streaming query outputs")
+        print("   Use Spark UI or streaming queries to monitor data")
     
     # ===========================
     # 8. COMPLETION
@@ -290,23 +334,54 @@ def run_etl_pipeline():
     print("="*80)
     
     print("\n📋 Pipeline Summary:")
-    print(f"   ✓ Total records processed: {final_df.count()}")
+    if not is_streaming_mode:
+        print(f"   ✓ Total records processed: {final_df.count()}")
+    else:
+        print(f"   ✓ Mode: STREAMING (real-time processing)")
     print(f"   ✓ Total columns: {len(final_df.columns)}")
     print(f"   ✓ Data sources integrated: 4 (Weather, 311, Taxi, Collisions)")
     print(f"   ✓ Outputs: Local JSON/CSV + MinIO (when configured)")
     
+    # Special handling for streaming mode
+    if is_streaming_mode:
+        print("\n⚡ STREAMING MODE ACTIVE")
+        print("   The pipeline is now continuously processing data from Kafka")
+        print("   Press Ctrl+C to stop the streaming queries")
+        print("\n   Active Queries:")
+        for query in spark.streams.active:
+            print(f"      - {query.name}: {query.status}")
+        
+        print("\n   Waiting for streaming queries... (Press Ctrl+C to stop)")
+        try:
+            # Keep pipeline running for streaming
+            spark.streams.awaitAnyTermination()
+        except KeyboardInterrupt:
+            print("\n\n🛑 Stopping streaming queries...")
+            stop_all_streaming_queries(spark)
+            print("✅ All streaming queries stopped successfully")
+    
     print("\n🎯 Next Steps:")
-    print("   1. Setup MinIO server (Docker or standalone)")
-    print("   2. Update minio_config.py with real credentials")
-    print("   3. Change DataWriter to output_type='minio'")
-    print("   4. Implement Kafka streaming readers")
-    print("   5. Add error handling and monitoring")
-    print("   6. Deploy to Spark cluster")
+    if reader.source_type == "json":
+        print("   1. Setup MinIO server (Docker or standalone)")
+        print("   2. Update minio_config.py with real credentials")
+        print("   3. Change DataWriter to output_type='minio'")
+        print("   4. Setup Kafka server")
+        print("   5. Update kafka_config.py with Kafka details")
+        print("   6. Change to source_type='kafka', kafka_mode='batch' or 'streaming'")
+    elif reader.kafka_mode == "batch":
+        print("   1. Consider upgrading to streaming mode for real-time processing")
+        print("   2. Add error handling and monitoring")
+        print("   3. Deploy to Spark cluster")
+    else:
+        print("   1. Monitor streaming queries via Spark UI")
+        print("   2. Set up alerting for emergency levels")
+        print("   3. Configure auto-scaling for high traffic")
     
     print("\n" + "="*80)
     
-    # Stop Spark
-    spark.stop()
+    # Stop Spark (only in batch mode)
+    if not is_streaming_mode:
+        spark.stop()
 
 
 if __name__ == "__main__":
