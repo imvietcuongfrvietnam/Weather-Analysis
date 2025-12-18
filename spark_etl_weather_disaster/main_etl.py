@@ -26,16 +26,31 @@ from writers.real_data_writer import DataWriter  # NEW: Use real writer
 
 
 def create_spark_session():
-    """Initialize Spark session"""
-    spark = SparkSession.builder \
+    """Initialize Spark session with MinIO/S3 support"""
+    # Import MinIO S3 configuration
+    try:
+        from minio_config import SPARK_S3_CONFIG
+        has_minio_config = True
+    except ImportError:
+        print("⚠️  minio_config.py not found. Running without MinIO support.")
+        has_minio_config = False
+    
+    # Build Spark session
+    builder = SparkSession.builder \
         .appName("WeatherDisasterETL") \
         .master("local[*]") \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.driver.memory", "4g") \
         .config("spark.driver.host", "localhost") \
-        .config("spark.driver.bindAddress", "127.0.0.1") \
-        .getOrCreate()
+        .config("spark.driver.bindAddress", "127.0.0.1")
     
+    # Add MinIO/S3 configurations if available
+    if has_minio_config:
+        print("📦 Adding MinIO/S3 configuration to Spark...")
+        for key, value in SPARK_S3_CONFIG.items():
+            builder = builder.config(key, value)
+    
+    spark = builder.getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
     return spark
 
@@ -133,8 +148,10 @@ def run_etl_pipeline():
     print("="*80)
     print("💡 Cleaned data is saved to ./output/*.json for inspection")
     
-    # Initialize DataWriter (will write to JSON by default)
-    data_writer = DataWriter(output_type="json")
+    # Initialize DataWriter
+    # Use "minio" for MinIO storage, or "json" for local testing
+    # Change to output_type="minio" when MinIO server is ready
+    data_writer = DataWriter(output_type="json")  # TODO: Change to "minio" when ready
     
     # Save cleaned data for each dataset
     data_writer.write_cleaned_data(weather_clean, "weather")
@@ -223,37 +240,23 @@ def run_etl_pipeline():
     print("\n✅ Final enriched data saved!")
     
     # ===========================
-    # 7. WRITE TO LEGACY OUTPUTS (for compatibility)
+    # 7. PREVIEW FINAL DATA
     # ===========================
     print("\n" + "="*80)
-    print("💾 STEP 6: WRITING TO LEGACY OUTPUTS")
+    print("💾 STEP 6: PREVIEW FINAL DATA")
     print("="*80)
     
     # Write to console (preview)
     writer.write_to_console(final_df, name="Integrated Weather-Disaster Data", num_rows=10)
     
-    # Write to fake HDFS (final enriched data)
-    writer.write_to_fake_hdfs(
-        final_df,
-        path="weather_disaster_integrated",
-        format="parquet",
-        mode="overwrite"
-    )
-    
-    # BONUS: Save intermediate stages to CSV for inspection
-    print("\n💾 Saving intermediate stages to CSV for inspection...")
+    # Save intermediate stages to local files for inspection
+    print("\n💾 Saving intermediate stages locally for inspection...")
     writer.write_to_fake_hdfs(weather_clean, path="stage_1_cleaned_weather", format="csv", mode="overwrite")
     writer.write_to_fake_hdfs(weather_norm, path="stage_2_normalized_weather", format="csv", mode="overwrite")
     writer.write_to_fake_hdfs(weather_enriched, path="stage_3_enriched_weather", format="csv", mode="overwrite")
     print("   ✅ Saved to: ./fake_output/stage_1_cleaned_weather/")
     print("   ✅ Saved to: ./fake_output/stage_2_normalized_weather/")
     print("   ✅ Saved to: ./fake_output/stage_3_enriched_weather/")
-    
-    # Write to fake Elasticsearch
-    writer.write_to_fake_elasticsearch(
-        final_df,
-        index="weather-disaster-nyc"
-    )
     
     # ===========================
     # 8. STATISTICS & SUMMARY
@@ -290,14 +293,15 @@ def run_etl_pipeline():
     print(f"   ✓ Total records processed: {final_df.count()}")
     print(f"   ✓ Total columns: {len(final_df.columns)}")
     print(f"   ✓ Data sources integrated: 4 (Weather, 311, Taxi, Collisions)")
-    print(f"   ✓ Outputs generated: Console + Fake HDFS + Fake Elasticsearch")
+    print(f"   ✓ Outputs: Local JSON/CSV + MinIO (when configured)")
     
     print("\n🎯 Next Steps:")
-    print("   1. Replace FakeDataReader with real Kafka/HDFS readers")
-    print("   2. Replace FakeDataWriter with real HDFS/Elasticsearch writers")
-    print("   3. Add error handling and logging")
-    print("   4. Deploy to Spark cluster")
-    print("   5. Schedule with Airflow")
+    print("   1. Setup MinIO server (Docker or standalone)")
+    print("   2. Update minio_config.py with real credentials")
+    print("   3. Change DataWriter to output_type='minio'")
+    print("   4. Implement Kafka streaming readers")
+    print("   5. Add error handling and monitoring")
+    print("   6. Deploy to Spark cluster")
     
     print("\n" + "="*80)
     
