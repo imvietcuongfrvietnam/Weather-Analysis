@@ -1,17 +1,10 @@
 import os
 
-# Kubernetes Service: weather-minio:9000
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+# Lấy từ biến môi trường (K8s Service), mặc định là localhost (cho test ngoài)
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = 6379
+REDIS_DB = 0
+REDIS_PASSWORD = None  # Nếu sau này có pass thì dùng os.getenv("REDIS_PASSWORD")
 
-# Lấy user/pass từ biến môi trường để khớp với manual_deploy.yaml
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-
-MINIO_SECURE = False
-MINIO_BUCKET = "weather-data"
-MINIO_FOLDERS = {
-    "cleaned": "cleaned",
-    "enriched": "enriched",
-    "raw": "raw",
-    "archive": "archive"
-}
+REDIS_KEY_PREFIX = "weather:current"
+REDIS_TTL = 3600

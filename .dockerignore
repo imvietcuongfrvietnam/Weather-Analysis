@@ -1,0 +1,21 @@
+# Bỏ qua toàn bộ dữ liệu (QUAN TRỌNG: để build nhanh)
+data/
+output/
+crawl/
+kafka/
+
+# Bỏ qua môi trường ảo và git
+venv/
+.git/
+.gitignore
+__pycache__/
+
+# Bỏ qua notebook nháp
+*.ipynb
+*.ipynb_checkpoints
+
+# Bỏ qua các file ảnh/tài liệu hướng dẫn
+*.jpg
+*.png
+*.md
+LICENSE
