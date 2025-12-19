@@ -1,36 +1,35 @@
 """
-MAIN ETL PIPELINE - LAMBDA ARCHITECTURE
-Spark ETL Streaming: 
-  1. Batch Layer: Kafka -> MinIO (Parquet) - Lưu trữ dài hạn
-  2. Speed Layer: Kafka -> Redis (Key-Value) - Realtime Dashboard
-
-CHẠY: python main_etl.py
+MAIN ETL PIPELINE - KUBERNETES READY
 """
 
 from pyspark.sql import SparkSession
 import sys
 import os
 
-# Cấu hình môi trường
+# --- QUAN TRỌNG: Cấu hình đường dẫn Python trong Container ---
+# Trong image Bitnami/Spark, python nằm ở /opt/bitnami/python/bin/python
+# Nhưng dùng sys.executable là an toàn nhất
 os.environ['PYSPARK_PYTHON'] = sys.executable
 os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
+
+# Thêm đường dẫn hiện tại vào path để import được các module con
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import các modules
+# Import configs
 import kafka_config
 import minio_config
-# import redis_config (Không bắt buộc import ở đây nếu bên writer đã import)
 
+# Import modules xử lý
 from readers.real_data_reader import DataReader
 from transformations.cleaning import DataCleaner
 from transformations.normalization import DataNormalizer
 from transformations.enrichment import DataEnricher
-
-# --- MỚI: Import Redis Writer ---
 from writers.redis_data_writer import RedisWriter 
 
 def create_spark_session():
-    """Khởi tạo Spark với hỗ trợ S3/MinIO"""
+    """Khởi tạo Spark Session tối ưu cho Kubernetes"""
+    
+    # Các thư viện cần thiết để Spark nói chuyện với MinIO (S3)
     packages = [
         "org.apache.hadoop:hadoop-aws:3.3.4",
         "com.amazonaws:aws-java-sdk-bundle:1.12.262"
@@ -40,8 +39,13 @@ def create_spark_session():
         .appName("WeatherLambdaArchitecture") \
         .master("local[*]") \
         .config("spark.sql.adaptive.enabled", "true") \
-        .config("spark.driver.memory", "2g") \
-        .config("spark.jars.packages", ",".join(packages))
+        .config("spark.driver.memory", "1g") \
+        .config("spark.executor.memory", "1g") \
+        .config("spark.jars.packages", ",".join(packages)) \
+        # --- FIX LỖI KUBERNETES ---
+        # Chuyển thư mục cache của Ivy (nơi lưu file JAR) về /tmp
+        # Vì user 1001 trong Docker đôi khi không có quyền ghi vào thư mục home mặc định
+        .config("spark.jars.ivy", "/tmp/.ivy2") 
 
     print("📦 Đang nạp cấu hình MinIO S3...")
     for key, value in minio_config.SPARK_S3_CONFIG.items():
@@ -53,12 +57,19 @@ def create_spark_session():
 
 def run_etl_pipeline():
     print("\n" + "="*80)
-    print("🚀 SPARK LAMBDA: KAFKA -> MINIO & REDIS")
+    print("🚀 SPARK LAMBDA ON K8S: KAFKA -> MINIO & REDIS")
     print("="*80)
     
-    spark = create_spark_session()
+    # 1. Khởi tạo Spark
+    try:
+        spark = create_spark_session()
+        print("✅ Spark Session đã khởi tạo thành công!")
+    except Exception as e:
+        print(f"❌ Lỗi khởi tạo Spark: {e}")
+        sys.exit(1)
     
-    # 1. READ & TRANSFORM (Dùng chung cho cả 2 nhánh)
+    # 2. READ (Đọc từ Kafka qua Service K8s)
+    # Lưu ý: kafka_config đã được update để lấy env KAFKA_BOOTSTRAP_SERVERS
     reader = DataReader(spark, source_type="kafka", kafka_mode="streaming")
     cleaner = DataCleaner()
     normalizer = DataNormalizer()
@@ -67,20 +78,20 @@ def run_etl_pipeline():
     print(f"\n🎧 Đang đọc topic '{kafka_config.KAFKA_TOPICS['weather']}'...")
     weather_df = reader.read_weather_data()
     
+    # 3. TRANSFORM
     print("⚙️  Đang xử lý dữ liệu...")
     weather_clean = cleaner.clean_weather_data(weather_df)
     weather_norm = normalizer.normalize_weather_data(weather_clean)
     weather_enriched = enricher.enrich_with_disaster_risk(weather_norm)
     
     # ==========================================
-    # NHÁNH 1: BATCH LAYER -> MINIO (Lưu kho)
+    # NHÁNH 1: BATCH LAYER -> MINIO
     # ==========================================
     output_minio = minio_config.get_minio_path("enriched", "weather", format="parquet")
-    # Checkpoint riêng cho MinIO
+    # Checkpoint lưu trên MinIO để đảm bảo an toàn nếu Pod chết
     ckpt_minio = f"s3a://{minio_config.MINIO_BUCKET}/checkpoints/weather_minio"
     
-    print(f"\n💾 Cấu hình MinIO (Batch Layer - 30s):")
-    print(f"   👉 Path: {output_minio}")
+    print(f"\n💾 MinIO Writer (Batch): {output_minio}")
     
     query_minio = weather_enriched.writeStream \
         .outputMode("append") \
@@ -92,15 +103,13 @@ def run_etl_pipeline():
         .start()
 
     # ==========================================
-    # NHÁNH 2: SPEED LAYER -> REDIS (Realtime)
+    # NHÁNH 2: SPEED LAYER -> REDIS
     # ==========================================
-    # Khởi tạo Writer
     redis_writer = RedisWriter()
-    # Checkpoint riêng cho Redis (QUAN TRỌNG: Không được trùng với MinIO)
+    # Checkpoint khác biệt cho Redis
     ckpt_redis = f"s3a://{minio_config.MINIO_BUCKET}/checkpoints/weather_redis"
     
-    print(f"\n🔥 Cấu hình Redis (Speed Layer - 5s):")
-    print(f"   👉 Checkpoint: {ckpt_redis}")
+    print(f"\n🔥 Redis Writer (Realtime): weather-redis")
     
     query_redis = weather_enriched.writeStream \
         .outputMode("append") \
@@ -111,28 +120,15 @@ def run_etl_pipeline():
         .start()
 
     print("\n" + "="*80)
-    print("✅ PIPELINE ĐA LUỒNG ĐANG CHẠY!")
-    print("   1. MinIO: Ghi mỗi 30 giây (Lưu lịch sử)")
-    print("   2. Redis: Ghi mỗi 5 giây (Cập nhật Dashboard)")
-    print("👉 Nhấn Ctrl+C để dừng lại.")
+    print("✅ PIPELINE ĐANG CHẠY TRONG KUBERNETES POD")
+    print("👉 Dùng lệnh 'kubectl logs -f [tên-pod]' để theo dõi")
     print("="*80)
 
     try:
-        # Chờ BẤT KỲ query nào kết thúc (hoặc lỗi)
         spark.streams.awaitAnyTermination()
     except KeyboardInterrupt:
         print("\n🛑 Đang dừng pipeline...")
-        # Dừng từng query một cách an toàn
-        if query_minio.isActive: query_minio.stop()
-        if query_redis.isActive: query_redis.stop()
         spark.stop()
-        print("✅ Đã dừng thành công.")
 
 if __name__ == "__main__":
-    try:
-        run_etl_pipeline()
-    except Exception as e:
-        print(f"\n❌ LỖI: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    run_etl_pipeline()

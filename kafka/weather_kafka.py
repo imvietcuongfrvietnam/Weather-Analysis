@@ -3,19 +3,29 @@ import json
 import csv
 import os
 from kafka import KafkaProducer
+from kafka.errors import KafkaError
 
 # --- CẤU HÌNH ---
-BOOTSTRAP_SERVERS = ['localhost:9092']
+# Nếu bạn đang port-forward 9094 thì để 9094
+# Nếu bạn đang port-forward 9092 thì đổi thành 9092
+BOOTSTRAP_SERVERS = ['localhost:9094'] 
 TOPIC_NAME = 'weather'
 DATA_FILE = 'data/data_weather.csv' 
-DELAY_SECONDS = 0.2
+DELAY_SECONDS = 0.5 # Tăng delay lên xíu để dễ nhìn log
 
 # --- KHỞI TẠO PRODUCER ---
-producer = KafkaProducer(
-    bootstrap_servers=BOOTSTRAP_SERVERS,
-    value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-    key_serializer=lambda k: k.encode('utf-8') if k else None
-)
+try:
+    producer = KafkaProducer(
+        bootstrap_servers=BOOTSTRAP_SERVERS,
+        value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+        key_serializer=lambda k: k.encode('utf-8') if k else None,
+        # Thêm timeout để không bị treo nếu mất mạng
+        request_timeout_ms=10000 
+    )
+    print(f"✅ Đã kết nối tới Kafka tại: {BOOTSTRAP_SERVERS}")
+except Exception as e:
+    print(f"❌ Lỗi kết nối Kafka: {e}")
+    exit(1)
 
 def safe_float(value):
     try:
@@ -48,13 +58,25 @@ def run_producer():
                     "wind_speed": safe_float(row['wind_speed'])
                 }
 
-                # 2. Gửi vào Kafka (Key là City để chia partition)
-                producer.send(TOPIC_NAME, key=message['City'], value=message)
+                # 2. Gửi vào Kafka và CHỜ XÁC NHẬN (Synchronous Send)
+                # key là City để chia partition
+                future = producer.send(TOPIC_NAME, key=message['City'], value=message)
                 
-                count += 1
-                print(f"[{count}] 📤 {message['datetime']} | {message['City']} | {message['temperature']}°C")
+                try:
+                    # Dòng này sẽ bắt chương trình dừng lại đợi Kafka trả lời "OK"
+                    # Nếu Kafka chết hoặc sai cổng, nó sẽ văng lỗi ngay tại đây
+                    record_metadata = future.get(timeout=10)
+                    
+                    count += 1
+                    print(f"[{count}] ✅ Đã gửi: {message['datetime']} | {message['City']} | "
+                          f"Partition: {record_metadata.partition} | Offset: {record_metadata.offset}")
+                
+                except KafkaError as e:
+                    print(f"❌ Gửi thất bại dòng {count}: {e}")
+                    # Nếu lỗi thì có thể break luôn hoặc thử lại tùy bạn
+                    break
 
-                # 3. Nghỉ 30 giây
+                # 3. Nghỉ
                 time.sleep(DELAY_SECONDS)
 
     except KeyboardInterrupt:
@@ -63,6 +85,7 @@ def run_producer():
         print(f"❌ Lỗi: {e}")
     finally:
         producer.close()
+        print("🔌 Đã đóng kết nối.")
 
 if __name__ == "__main__":
     run_producer()

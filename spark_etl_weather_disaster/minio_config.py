@@ -1,53 +1,20 @@
-"""
-MinIO Configuration
-Cấu hình kết nối MinIO - S3-compatible object storage
+import os
 
-HƯỚNG DẪN:
-1. Development (Local): Dùng MinIO local server (localhost:9000)
-2. Production: Thay đổi MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
+# Kubernetes Service: weather-minio:9000
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 
-SETUP MinIO LOCAL (Docker):
-docker run -p 9000:9000 -p 9001:9001 \
-  -e "MINIO_ROOT_USER=minioadmin" \
-  -e "MINIO_ROOT_PASSWORD=minioadmin" \
-  quay.io/minio/minio server /data --console-address ":9001"
+# Lấy user/pass từ biến môi trường để khớp với manual_deploy.yaml
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 
-Sau đó truy cập: http://localhost:9001 để quản lý buckets
-"""
-
-# ===========================
-# MINIO CONFIGURATION
-# ===========================
-
-# MinIO Server Endpoint (không bao gồm http://)
-# Local: localhost:9000
-# Production: Thay bằng endpoint thật (ví dụ: minio.yourcompany.com:9000)
-MINIO_ENDPOINT = "localhost:9000"
-
-# MinIO Access Credentials
-# Local default: minioadmin/minioadmin
-# Production: Thay bằng credentials thật
-MINIO_ACCESS_KEY = "minioadmin"
-MINIO_SECRET_KEY = "minioadmin"
-
-# Sử dụng HTTPS hay không (Local thường dùng False)
-MINIO_SECURE = False  # True cho production với SSL
-
-# ===========================
-# BUCKET CONFIGURATION
-# ===========================
-
-# Bucket chính để lưu dữ liệu weather
+MINIO_SECURE = False
 MINIO_BUCKET = "weather-data"
-
-# Folder structure trong bucket
 MINIO_FOLDERS = {
-    "cleaned": "cleaned",        # Dữ liệu đã cleaned
-    "enriched": "enriched",      # Dữ liệu đã enriched/integrated
-    "raw": "raw",                # (Optional) Dữ liệu thô
-    "archive": "archive"         # (Optional) Dữ liệu archive
+    "cleaned": "cleaned",
+    "enriched": "enriched",
+    "raw": "raw",
+    "archive": "archive"
 }
-
 # ===========================
 # SPARK S3 CONFIGURATION
 # ===========================
