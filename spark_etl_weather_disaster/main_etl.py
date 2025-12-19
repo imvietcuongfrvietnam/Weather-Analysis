@@ -277,10 +277,10 @@ def run_etl_pipeline():
     print("\n✅ Final enriched data saved!")
     
     # ===========================
-    # 7. PREVIEW FINAL DATA
+    # 7. PREVIEW & OUTPUTS
     # ===========================
     print("\n" + "="*80)
-    print("💾 STEP 6: PREVIEW FINAL DATA")
+    print("💾 STEP 6: PREVIEW & FINAL OUTPUTS")
     print("="*80)
     
     # Write to console (preview)
@@ -297,6 +297,7 @@ def run_etl_pipeline():
     
     # ===========================
     # 8. STATISTICS & SUMMARY (streaming-aware)
+    # ===========================
     # ===========================
     print("\n" + "="*80)
     print("📊 STEP 7: SUMMARY STATISTICS")
@@ -327,9 +328,6 @@ def run_etl_pipeline():
         print("   Use Spark UI or streaming queries to monitor data")
     
     # ===========================
-    # 8. COMPLETION
-    # ===========================
-    print("\n" + "="*80)
     print("✅ ETL PIPELINE COMPLETED SUCCESSFULLY!")
     print("="*80)
     
@@ -372,7 +370,7 @@ def run_etl_pipeline():
         print("   1. Consider upgrading to streaming mode for real-time processing")
         print("   2. Add error handling and monitoring")
         print("   3. Deploy to Spark cluster")
-    else:
+    else: # This covers streaming mode
         print("   1. Monitor streaming queries via Spark UI")
         print("   2. Set up alerting for emergency levels")
         print("   3. Configure auto-scaling for high traffic")

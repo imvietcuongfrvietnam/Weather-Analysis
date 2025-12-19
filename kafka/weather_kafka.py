@@ -2,6 +2,8 @@ import time
 import json
 import random
 import sys
+import csv
+import os
 from datetime import datetime
 from kafka import KafkaProducer, KafkaAdminClient
 from kafka.admin import NewTopic
@@ -11,6 +13,7 @@ from kafka.errors import TopicAlreadyExistsError, KafkaError
 BOOTSTRAP_SERVERS = ['localhost:9092']
 TOPIC_NAME = 'nyc-weather-raw' 
 LOCATIONS = ["Manhattan", "Queens", "Brooklyn", "Bronx", "Staten_Island"]
+DATA_FILE = 'data/data_weather.csv' 
 
 # Danh sách mô tả thời tiết (Lấy từ dữ liệu mẫu của NYC)
 WEATHER_OPTS = [
@@ -43,7 +46,6 @@ def generate_mock_record(location_name):
     is_coastal = location_name in ["Queens", "Brooklyn", "Staten_Island"]
     
     return {
-        # --- CÁC TRƯỜNG DỮ LIỆU GỐC (Original Schema) ---
         "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "temperature": round(random.gauss(base_temp, 5), 2),
         "humidity": round(random.uniform(30, 90), 1),
@@ -51,18 +53,23 @@ def generate_mock_record(location_name):
         "weather_desc": random.choice(WEATHER_OPTS),
         "wind_speed": round(random.uniform(0, 10) + (5 if is_coastal else 0), 1),
         "wind_direction": round(random.uniform(0, 360), 0),
-        
-        # --- TRƯỜNG BỔ SUNG LÀM KEY (Enrichment) ---
         "location": location_name
     }
 
+def safe_float(value):
+    """Hàm phụ trợ: Chuyển string sang float, nếu lỗi hoặc rỗng thì trả về None"""
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
 # --- 3. CHƯƠNG TRÌNH CHÍNH ---
-def run_producer():
-    # Cấu hình Producer tối ưu (Batching + Compression)
+def run_producer(mode='mock'):
+    # Cấu hình Producer tối ưu
     producer = KafkaProducer(
         bootstrap_servers=BOOTSTRAP_SERVERS,
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-        key_serializer=lambda k: k.encode('utf-8'), # Key phải là bytes
+        key_serializer=lambda k: k.encode('utf-8') if k else None,
         acks='all',
         retries=3,
         batch_size=16384,
@@ -70,37 +77,52 @@ def run_producer():
         compression_type='gzip'
     )
     
-    print(f"🚀 BẮT ĐẦU BƠM DỮ LIỆU VÀO TOPIC: {TOPIC_NAME}")
+    print(f"🚀 BẮT ĐẦU BƠM DỮ LIỆU ({mode.upper()}) VÀO TOPIC: {TOPIC_NAME}")
     print("👉 Nhấn Ctrl+C để dừng lại.")
 
     try:
-        while True:
-            for loc in LOCATIONS:
-                # 1. Tạo data ảo
-                mock_data = generate_mock_record(loc)
-                
-                try:
-                    # 2. Gửi vào Kafka
-                    # Quan trọng: Key=loc để Kafka chia partition theo quận
-                    future = producer.send(TOPIC_NAME, key=loc, value=mock_data)
-                    
-                    # (Tùy chọn) In log ra màn hình để nhìn cho sướng mắt
-                    # Chỉ in đại diện Manhattan để đỡ trôi màn hình quá nhanh
+        if mode == 'mock':
+            while True:
+                for loc in LOCATIONS:
+                    mock_data = generate_mock_record(loc)
+                    producer.send(TOPIC_NAME, key=loc, value=mock_data)
                     if loc == "Manhattan":
-                        print(f"📤 [Gửi {loc}] Temp: {mock_data['temperature']}°C | {mock_data['weather_desc']}")
-                        
-                except KafkaError as e:
-                    print(f"❌ Lỗi gửi: {e}")
-
-            # 3. Giả lập thời gian thực (1 giây cập nhật 1 lần cho cả 5 quận)
-            time.sleep(1)
+                        print(f"📤 [Mock {loc}] Temp: {mock_data['temperature']}°C | {mock_data['weather_desc']}")
+                time.sleep(1)
+        
+        elif mode == 'csv':
+            if not os.path.exists(DATA_FILE):
+                print(f"❌ Lỗi: Không tìm thấy file tại {DATA_FILE}")
+                return
+            with open(DATA_FILE, mode='r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                count = 0
+                for row in reader:
+                    message = {
+                        "datetime": row['datetime'],
+                        "location": row.get('City', 'Unknown'),
+                        "temperature": safe_float(row['temperature']),
+                        "humidity": safe_float(row['humidity']),
+                        "pressure": safe_float(row['pressure']),
+                        "weather_desc": row['weather_desc'],
+                        "wind_direction": safe_float(row['wind_direction']),
+                        "wind_speed": safe_float(row['wind_speed'])
+                    }
+                    producer.send(TOPIC_NAME, key=message['location'], value=message)
+                    count += 1
+                    print(f"[{count}] 📤 CSV: {message['location']} ({message['datetime']}): {message['temperature']}°C")
+                    time.sleep(0.2)
 
     except KeyboardInterrupt:
         print("\n🛑 Đang dừng Producer...")
+    except Exception as e:
+        print(f"❌ Có lỗi xảy ra: {e}")
+    finally:
         producer.flush()
         producer.close()
-        print("✅ Đã tắt thành công.")
+        print("✅ Đã đóng kết nối Kafka.")
 
 if __name__ == "__main__":
     create_topic()
-    run_producer()
+    # Mặc định chạy mock mode, có thể đổi sang 'csv'
+    run_producer(mode='mock')

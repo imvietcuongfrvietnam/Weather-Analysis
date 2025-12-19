@@ -4,7 +4,7 @@ Read data from JSON files (for testing) or Kafka (for production)
 """
 
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import from_json
+from pyspark.sql.functions import from_json, col, expr
 from pyspark.sql.types import StructType
 from schemas.data_schemas import (
     weather_schema_long,
@@ -224,6 +224,7 @@ class DataReader:
         
         # No schema found
         return None
+
     
     def _read_from_hdfs(self, path: str) -> DataFrame:
         """
