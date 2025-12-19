@@ -1,0 +1,33 @@
+# --- DỮ LIỆU (Giữ nguyên cái bạn đã viết) ---
+data/*
+# Nếu muốn giữ lại thư mục data (chỉ bỏ qua file bên trong) thì tạo thêm file .gitkeep rỗng trong data
+!data/.gitkeep 
+
+# --- PYTHON (Bắt buộc phải có) ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- JUPYTER NOTEBOOK (Bạn đang dùng .ipynb nên cần cái này) ---
+.ipynb_checkpoints/
+
+# --- MÔI TRƯỜNG & BẢO MẬT (Rất quan trọng) ---
+.env
+venv/
+env/
+.venv/
+*.key
+*.pem
+
+# --- IDE (Cấu hình riêng của VS Code) ---
+.vscode/
+.idea/
+
+# --- LOGS (Khi chạy Kafka/Spark sinh ra log) ---
+*.log
+logs/
+
+# --- SPARK/HADOOP (Nếu chạy local hay sinh ra folder này) ---
+metastore_db/
+derby.log
