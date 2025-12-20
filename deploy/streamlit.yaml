@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-dashboard
+  namespace: default   # Cùng namespace với Redis/Postgres/Spark
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weather-dashboard
+  template:
+    metadata:
+      labels:
+        app: weather-dashboard
+    spec:
+      containers:
+      - name: dashboard
+        image: weather-dashboard:v1
+        imagePullPolicy: Never  # QUAN TRỌNG: Để K8s dùng image local vừa build
+        ports:
+        - containerPort: 8501
+        env:
+        # --- KẾT NỐI REDIS (REAL-TIME) ---
+        - name: REDIS_HOST
+          value: "weather-redis"  # Tên Service Redis
+        - name: REDIS_PORT
+          value: "6379"
+        
+        # --- KẾT NỐI POSTGRES (FORECAST) ---
+        - name: POSTGRES_HOST
+          value: "weather-postgresql" # Tên Service Postgres
+        - name: POSTGRES_DB
+          value: "weather_db"
+        - name: POSTGRES_USER
+          value: "weather_user"
+        - name: POSTGRES_PASSWORD
+          value: "weather_pass"
+        - name: POSTGRES_TABLE
+          value: "weather_predictions"
+
+        # --- CẤU HÌNH APP ---
+        - name: DASHBOARD_REFRESH_SECONDS
+          value: "5"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-dashboard
+  namespace: default
+spec:
+  type: NodePort  # Dùng NodePort để dễ truy cập từ máy local
+  selector:
+    app: weather-dashboard
+  ports:
+    - port: 80        # Port ảo của Service
+      targetPort: 8501 # Port thật của Streamlit Container
+      nodePort: 30005  # (Tùy chọn) Cố định port truy cập
