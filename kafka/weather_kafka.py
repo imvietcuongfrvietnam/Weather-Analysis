@@ -6,12 +6,11 @@ from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
 # --- CẤU HÌNH ---
-# Nếu bạn đang port-forward 9094 thì để 9094
-# Nếu bạn đang port-forward 9092 thì đổi thành 9092
+
 BOOTSTRAP_SERVERS = ['localhost:9094'] 
 TOPIC_NAME = 'weather'
-DATA_FILE = 'data/data_weather.csv' 
-DELAY_SECONDS = 0.5 # Tăng delay lên xíu để dễ nhìn log
+DATA_FILE = '../data/data_weather.csv' 
+DELAY_SECONDS = 0.5 
 
 # --- KHỞI TẠO PRODUCER ---
 try:
@@ -58,13 +57,10 @@ def run_producer():
                     "wind_speed": safe_float(row['wind_speed'])
                 }
 
-                # 2. Gửi vào Kafka và CHỜ XÁC NHẬN (Synchronous Send)
                 # key là City để chia partition
                 future = producer.send(TOPIC_NAME, key=message['City'], value=message)
                 
                 try:
-                    # Dòng này sẽ bắt chương trình dừng lại đợi Kafka trả lời "OK"
-                    # Nếu Kafka chết hoặc sai cổng, nó sẽ văng lỗi ngay tại đây
                     record_metadata = future.get(timeout=10)
                     
                     count += 1
@@ -73,10 +69,8 @@ def run_producer():
                 
                 except KafkaError as e:
                     print(f"❌ Gửi thất bại dòng {count}: {e}")
-                    # Nếu lỗi thì có thể break luôn hoặc thử lại tùy bạn
                     break
 
-                # 3. Nghỉ
                 time.sleep(DELAY_SECONDS)
 
     except KeyboardInterrupt:

@@ -13,12 +13,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 # --- MÔI TRƯỜNG & BẢO MẬT (Rất quan trọng) ---
-.env
-venv/
-env/
-.venv/
-*.key
-*.pem
+
 
 # --- IDE (Cấu hình riêng của VS Code) ---
 .vscode/
