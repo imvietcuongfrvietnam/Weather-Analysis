@@ -1,25 +1,28 @@
-"""
-MAIN ETL PIPELINE - KUBERNETES READY
-"""
-
 from pyspark.sql import SparkSession
 import sys
 import os
 
-# --- QUAN TRỌNG: Cấu hình đường dẫn Python trong Container ---
-# Trong image Bitnami/Spark, python nằm ở /opt/bitnami/python/bin/python
-# Nhưng dùng sys.executable là an toàn nhất
+# --- 1. SETUP MÔI TRƯỜNG PYTHON ---
 os.environ['PYSPARK_PYTHON'] = sys.executable
 os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
 
-# Thêm đường dẫn hiện tại vào path để import được các module con
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# --- 2. FIX ĐƯỜNG DẪN (PATH) ---
+# Lấy đường dẫn gốc của project (Folder 'spark')
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.append(ROOT_DIR)
 
-# Import configs
-import kafka_config
-import minio_config
+# --- 3. IMPORT CONFIGS (SỬA LẠI CHO CHUẨN) ---
+# Vì file nằm trong folder 'config', ta phải import từ package 'config'
+try:
+    from config import kafka_config
+    from config import minio_config
+except ImportError:
+    # Fallback: Nếu bạn lỡ để file config ngay ngoài root
+    import kafka_config
+    import minio_config
 
-# Import modules xử lý
+# --- 4. IMPORT MODULES XỬ LÝ ---
 from readers.real_data_reader import DataReader
 from transformations.cleaning import DataCleaner
 from transformations.normalization import DataNormalizer
@@ -29,22 +32,21 @@ from writers.redis_data_writer import RedisWriter
 def create_spark_session():
     """Khởi tạo Spark Session tối ưu cho Kubernetes"""
     
-    # Các thư viện cần thiết để Spark nói chuyện với MinIO (S3)
     packages = [
         "org.apache.hadoop:hadoop-aws:3.3.4",
-        "com.amazonaws:aws-java-sdk-bundle:1.12.262"
+        "com.amazonaws:aws-java-sdk-bundle:1.12.262",
+        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0" # Thêm Kafka Package nếu chưa có trong image
     ]
     
     builder = SparkSession.builder \
         .appName("WeatherLambdaArchitecture") \
+        # Lưu ý: 'local[*]' nghĩa là chạy client mode bên trong Pod. 
+        # Với Deployment 1 Pod như hiện tại thì OK.
         .master("local[*]") \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.driver.memory", "1g") \
         .config("spark.executor.memory", "1g") \
         .config("spark.jars.packages", ",".join(packages)) \
-        # --- FIX LỖI KUBERNETES ---
-        # Chuyển thư mục cache của Ivy (nơi lưu file JAR) về /tmp
-        # Vì user 1001 trong Docker đôi khi không có quyền ghi vào thư mục home mặc định
         .config("spark.jars.ivy", "/tmp/.ivy2") 
 
     print("📦 Đang nạp cấu hình MinIO S3...")
@@ -68,8 +70,8 @@ def run_etl_pipeline():
         print(f"❌ Lỗi khởi tạo Spark: {e}")
         sys.exit(1)
     
-    # 2. READ (Đọc từ Kafka qua Service K8s)
-    # Lưu ý: kafka_config đã được update để lấy env KAFKA_BOOTSTRAP_SERVERS
+    # 2. READ
+    # Đảm bảo Reader của bạn dùng đúng biến KAFKA_BOOTSTRAP_SERVERS từ file config
     reader = DataReader(spark, source_type="kafka", kafka_mode="streaming")
     cleaner = DataCleaner()
     normalizer = DataNormalizer()
@@ -88,11 +90,11 @@ def run_etl_pipeline():
     # NHÁNH 1: BATCH LAYER -> MINIO
     # ==========================================
     output_minio = minio_config.get_minio_path("enriched", "weather", format="parquet")
-    # Checkpoint lưu trên MinIO để đảm bảo an toàn nếu Pod chết
     ckpt_minio = f"s3a://{minio_config.MINIO_BUCKET}/checkpoints/weather_minio"
     
     print(f"\n💾 MinIO Writer (Batch): {output_minio}")
     
+    # Thêm trigger availableNow=False để đảm bảo chạy streaming liên tục
     query_minio = weather_enriched.writeStream \
         .outputMode("append") \
         .format("parquet") \
@@ -106,7 +108,6 @@ def run_etl_pipeline():
     # NHÁNH 2: SPEED LAYER -> REDIS
     # ==========================================
     redis_writer = RedisWriter()
-    # Checkpoint khác biệt cho Redis
     ckpt_redis = f"s3a://{minio_config.MINIO_BUCKET}/checkpoints/weather_redis"
     
     print(f"\n🔥 Redis Writer (Realtime): weather-redis")
@@ -121,7 +122,6 @@ def run_etl_pipeline():
 
     print("\n" + "="*80)
     print("✅ PIPELINE ĐANG CHẠY TRONG KUBERNETES POD")
-    print("👉 Dùng lệnh 'kubectl logs -f [tên-pod]' để theo dõi")
     print("="*80)
 
     try:

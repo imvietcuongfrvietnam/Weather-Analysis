@@ -1,0 +1,27 @@
+# --- RÁC PYTHON & CẤU HÌNH ---
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+.pytest_cache/
+
+# --- FILE HỆ THỐNG & GIT ---
+.DS_Store
+.git
+.gitignore
+
+# --- DỮ LIỆU TẠM CỦA SPARK (NẾU CÓ CHẠY LOCAL) ---
+logs/
+work/
+warehouse/
+spark-warehouse/
+checkpoint/
+
+# --- FILE NOTEBOOK & TÀI LIỆU ---
+*.ipynb
+*.ipynb_checkpoints
+*.md
+*.jpg
+*.png

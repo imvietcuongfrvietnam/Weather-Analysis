@@ -4,9 +4,10 @@ import csv
 import os
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
+# --- THÊM IMPORT NÀY ---
+from datetime import datetime 
 
 # --- CẤU HÌNH ---
-
 BOOTSTRAP_SERVERS = ['localhost:9094'] 
 TOPIC_NAME = 'weather'
 DATA_FILE = '../data/data_weather.csv' 
@@ -18,7 +19,6 @@ try:
         bootstrap_servers=BOOTSTRAP_SERVERS,
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
         key_serializer=lambda k: k.encode('utf-8') if k else None,
-        # Thêm timeout để không bị treo nếu mất mạng
         request_timeout_ms=10000 
     )
     print(f"✅ Đã kết nối tới Kafka tại: {BOOTSTRAP_SERVERS}")
@@ -34,6 +34,7 @@ def safe_float(value):
 
 def run_producer():
     print(f"🚀 BẮT ĐẦU STREAMING TỪ FILE: {DATA_FILE}")
+    print(f"🕒 Chế độ: Giả lập Real-time (Thay đổi năm 2012 -> Hiện tại)")
     
     if not os.path.exists(DATA_FILE):
         print(f"❌ Lỗi: Không tìm thấy file {DATA_FILE}. Hãy chạy script preprocess trước!")
@@ -45,9 +46,13 @@ def run_producer():
             
             count = 0
             for row in reader:
+                # Lấy thời gian hiện tại để dashboard hiển thị được
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
                 # 1. Chuẩn hóa dữ liệu
                 message = {
-                    "datetime": row['datetime'],
+                    # SỬA Ở ĐÂY: Dùng current_time thay vì row['datetime'] cũ
+                    "datetime": current_time, 
                     "City": row['City'],
                     "temperature": safe_float(row['temperature']),
                     "humidity": safe_float(row['humidity']),
@@ -65,7 +70,7 @@ def run_producer():
                     
                     count += 1
                     print(f"[{count}] ✅ Đã gửi: {message['datetime']} | {message['City']} | "
-                          f"Partition: {record_metadata.partition} | Offset: {record_metadata.offset}")
+                          f"Temp: {message['temperature']} | Offset: {record_metadata.offset}")
                 
                 except KafkaError as e:
                     print(f"❌ Gửi thất bại dòng {count}: {e}")

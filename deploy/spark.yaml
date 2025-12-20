@@ -1,8 +1,7 @@
-# --- SERVICE CHO MASTER (Đổi tên để tránh xung đột biến môi trường) ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: spark-cluster-master  # ĐÃ ĐỔI TÊN
+  name: spark-cluster-master  
 spec:
   ports:
     - port: 7077
@@ -20,7 +19,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: spark-cluster-master # ĐÃ ĐỔI TÊN
+  name: spark-cluster-master 
 spec:
   replicas: 1
   selector:
@@ -33,7 +32,7 @@ spec:
     spec:
       containers:
         - name: spark-cluster-master
-          image: weather-etl-app:v2
+          image: weather-etl-app:v3
           imagePullPolicy: Never
           command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
           # Explicitly set port args just in case
@@ -64,10 +63,9 @@ spec:
     spec:
       containers:
         - name: spark-worker
-          image: weather-etl-app:v2
+          image: weather-etl-app:v3
           imagePullPolicy: Never
           command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker"]
-          # CHÚ Ý: Đã đổi địa chỉ connect sang service mới
           args: ["spark://spark-cluster-master:7077", "--webui-port", "8081"] 
           env:
             - name: SPARK_WORKER_CORES
