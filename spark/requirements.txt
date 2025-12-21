@@ -1,7 +1,6 @@
 # --- DATA PROCESSING ---
 numpy>=1.23.0
 pandas>=2.0.0
-# pyspark: KHÔNG CẦN cài ở đây vì Base Image đã có sẵn
 
 # --- CONNECTORS (QUAN TRỌNG) ---
 kafka-python>=2.0.2

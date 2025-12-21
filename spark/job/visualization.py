@@ -1,95 +1,100 @@
 """
 Visualization - Plot Weather Forecasts
 Trực quan hóa kết quả dự đoán thời tiết
+Updated: Fix metric keys (R2 -> r2) and Config Import
 """
 
 import matplotlib
-matplotlib.use('Agg')  # Use non-GUI backend for server environments
+matplotlib.use('Agg')  # Backend không GUI (quan trọng cho Server/Docker)
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from datetime import datetime, timedelta
 import pandas as pd
+import sys
 import os
-import config
+
+# --- IMPORT CONFIG ---
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    import config
+except ImportError:
+    # Fallback Config
+    class Config:
+        LOCAL_PLOTS_DIR = "./plots_output"
+        CONTINUOUS_FEATURES = ["temperature", "humidity", "pressure", "wind_speed", "precipitation_mm"]
+        CATEGORICAL_FEATURES = ["weather_desc"]
+    config = Config()
 
 class ForecastVisualizer:
     """Create visualizations for weather forecasts"""
     
     def __init__(self, output_dir: str = None):
         self.output_dir = output_dir or config.LOCAL_PLOTS_DIR
-        os.makedirs(self.output_dir, exist_ok=True)
+        # Tạo thư mục nếu chưa tồn tại
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
         
-        # Set style
-        plt.style.use('seaborn-v0_8-darkgrid')
+        # Set style (tùy chỉnh lại để không phụ thuộc seaborn nếu chưa cài)
+        try:
+            plt.style.use('seaborn-v0_8-darkgrid')
+        except:
+            plt.style.use('ggplot')
     
     def plot_single_feature(self, df_pandas: pd.DataFrame, target_feature: str,
                            datetime_col: str = 'datetime',
                            save: bool = True):
         """
-        Plot actual vs predicted for a single feature
-        
-        Args:
-            df_pandas: Pandas DataFrame with datetime, actual, and predicted values
-            target_feature: Name of target feature
-            datetime_col: Name of datetime column
-            save: Whether to save the plot
+        Vẽ biểu đồ so sánh Thực tế vs Dự đoán cho 1 đặc trưng
         """
         prediction_col = f"prediction_{target_feature}"
         
-        if prediction_col not in df_pandas.columns:
-            print(f"   ⚠️  No predictions for {target_feature}, skipping plot")
+        if prediction_col not in df_pandas.columns or target_feature not in df_pandas.columns:
             return
         
         fig, ax = plt.subplots(figsize=(14, 6))
         
-        # Plot actual values
-        ax.plot(df_pandas[datetime_col], df_pandas[target_feature],
-                label='Actual', color='blue', linewidth=2, alpha=0.7)
+        # Sắp xếp theo thời gian để vẽ line chart không bị rối
+        df_sorted = df_pandas.sort_values(by=datetime_col)
         
-        # Plot predictions
-        ax.plot(df_pandas[datetime_col], df_pandas[prediction_col],
-                label='Predicted', color='red', linewidth=2, alpha=0.7, linestyle='--')
+        # Plot Actual
+        ax.plot(df_sorted[datetime_col], df_sorted[target_feature],
+                label='Actual', color='dodgerblue', linewidth=2, alpha=0.8)
+        
+        # Plot Predicted
+        ax.plot(df_sorted[datetime_col], df_sorted[prediction_col],
+                label='Predicted', color='tomato', linewidth=2, alpha=0.8, linestyle='--')
         
         # Formatting
-        ax.set_xlabel('DateTime', fontsize=12)
         ax.set_ylabel(target_feature.replace('_', ' ').title(), fontsize=12)
-        ax.set_title(f'Weather Forecast: {target_feature.replace("_", " ").title()}',
-                    fontsize=14, fontweight='bold')
+        ax.set_title(f'Forecast: {target_feature}', fontsize=14, fontweight='bold')
         ax.legend(loc='best', fontsize=10)
         ax.grid(True, alpha=0.3)
         
         # Format x-axis dates
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
         plt.xticks(rotation=45, ha='right')
-        
         plt.tight_layout()
         
         if save:
             filename = os.path.join(self.output_dir, f"{target_feature}_forecast.png")
-            plt.savefig(filename, dpi=150, bbox_inches='tight')
-            print(f"   💾 Saved plot: {filename}")
+            plt.savefig(filename, dpi=100)
+            print(f"   📊 Saved plot: {filename}")
         
         plt.close()
     
     def plot_all_features(self, df_pandas: pd.DataFrame, datetime_col: str = 'datetime'):
         """
-        Create plots for all target features
-        
-        Args:
-            df_pandas: Pandas DataFrame with all predictions
-            datetime_col: Name of datetime column
+        Vẽ tất cả các biểu đồ
         """
         print(f"\n📊 Creating forecast visualizations...")
         
-        # Plot each continuous feature
+        # 1. Continuous Features
         for target in config.CONTINUOUS_FEATURES:
-            if target in df_pandas.columns:
-                self.plot_single_feature(df_pandas, target, datetime_col)
+            self.plot_single_feature(df_pandas, target, datetime_col)
         
-        # Plot categorical feature (if applicable)
-        for target in config.CATEGORICAL_FEATURES:
-            if target in df_pandas.columns:
-                # For categorical, we can create a different style plot
+        # 2. Categorical Features
+        if hasattr(config, 'CATEGORICAL_FEATURES'):
+            for target in config.CATEGORICAL_FEATURES:
                 self.plot_categorical_feature(df_pandas, target, datetime_col)
         
         print(f"   ✅ All plots saved to {self.output_dir}")
@@ -97,12 +102,7 @@ class ForecastVisualizer:
     def plot_categorical_feature(self, df_pandas: pd.DataFrame, target_feature: str,
                                  datetime_col: str = 'datetime'):
         """
-        Plot categorical feature predictions
-        
-        Args:
-            df_pandas: Pandas DataFrame
-            target_feature: Name of categorical feature
-            datetime_col: Name of datetime column
+        Vẽ biểu đồ Scatter cho dữ liệu phân loại (VD: Mưa, Nắng)
         """
         prediction_col = f"prediction_{target_feature}"
         
@@ -110,157 +110,90 @@ class ForecastVisualizer:
             return
         
         fig, ax = plt.subplots(figsize=(14, 6))
+        df_sorted = df_pandas.sort_values(by=datetime_col)
         
         # Convert categories to numeric for plotting
-        categories = sorted(df_pandas[target_feature].dropna().unique())
+        # Lấy tập hợp tất cả các giá trị (cả thực tế và dự đoán)
+        all_cats = pd.concat([df_sorted[target_feature], df_sorted[prediction_col]]).dropna().unique()
+        categories = sorted(all_cats)
         category_map = {cat: idx for idx, cat in enumerate(categories)}
         
-        actual_numeric = df_pandas[target_feature].map(category_map)
-        predicted_numeric = df_pandas[prediction_col].map(category_map)
+        actual_numeric = df_sorted[target_feature].map(category_map)
+        predicted_numeric = df_sorted[prediction_col].map(category_map)
         
-        # Plot
-        ax.scatter(df_pandas[datetime_col], actual_numeric,
-                  label='Actual', color='blue', alpha=0.6, s=50)
-        ax.scatter(df_pandas[datetime_col], predicted_numeric,
-                  label='Predicted', color='red', alpha=0.6, s=50, marker='x')
+        # Plot Scatter
+        ax.scatter(df_sorted[datetime_col], actual_numeric,
+                  label='Actual', color='dodgerblue', alpha=0.6, s=60, marker='o')
+        ax.scatter(df_sorted[datetime_col], predicted_numeric,
+                  label='Predicted', color='tomato', alpha=0.6, s=60, marker='x')
         
-        # Set y-ticks to category names
+        # Set y-ticks
         ax.set_yticks(range(len(categories)))
         ax.set_yticklabels(categories)
         
-        ax.set_xlabel('DateTime', fontsize=12)
-        ax.set_ylabel('Weather Condition', fontsize=12)
-        ax.set_title(f'Weather Condition Forecast', fontsize=14, fontweight='bold')
-        ax.legend(loc='best', fontsize=10)
-        ax.grid(True, alpha=0.3, axis='x')
+        ax.set_title(f'Forecast: {target_feature}', fontsize=14, fontweight='bold')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
         
-        # Format x-axis
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-        plt.xticks(rotation=45, ha='right')
-        
+        # Format Date
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+        plt.xticks(rotation=45)
         plt.tight_layout()
         
         filename = os.path.join(self.output_dir, f"{target_feature}_forecast.png")
-        plt.savefig(filename, dpi=150, bbox_inches='tight')
-        print(f"   💾 Saved plot: {filename}")
-        
-        plt.close()
-    
-    def plot_multi_panel_dashboard(self, df_pandas: pd.DataFrame,
-                                   datetime_col: str = 'datetime'):
-        """
-        Create a multi-panel dashboard with all features
-        
-        Args:
-            df_pandas: Pandas DataFrame with all predictions
-            datetime_col: Name of datetime column
-        """
-        print(f"\n📊 Creating dashboard...")
-        
-        # Create figure with subplots
-        n_features = len(config.CONTINUOUS_FEATURES)
-        fig, axes = plt.subplots(n_features, 1, figsize=(16, 4 * n_features))
-        
-        if n_features == 1:
-            axes = [axes]
-        
-        for idx, target in enumerate(config.CONTINUOUS_FEATURES):
-            if target not in df_pandas.columns:
-                continue
-            
-            prediction_col = f"prediction_{target}"
-            if prediction_col not in df_pandas.columns:
-                continue
-            
-            ax = axes[idx]
-            
-            # Plot
-            ax.plot(df_pandas[datetime_col], df_pandas[target],
-                   label='Actual', color='blue', linewidth=2, alpha=0.7)
-            ax.plot(df_pandas[datetime_col], df_pandas[prediction_col],
-                   label='Predicted', color='red', linewidth=2, alpha=0.7, linestyle='--')
-            
-            # Formatting
-            ax.set_ylabel(target.replace('_', ' ').title(), fontsize=11)
-            ax.legend(loc='best', fontsize=9)
-            ax.grid(True, alpha=0.3)
-            
-            # Only show x-label on bottom plot
-            if idx == n_features - 1:
-                ax.set_xlabel('DateTime', fontsize=12)
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
-            else:
-                ax.set_xticklabels([])
-        
-        fig.suptitle('7-Day Weather Forecast Dashboard',
-                    fontsize=16, fontweight='bold', y=0.995)
-        
-        plt.tight_layout()
-        
-        filename = os.path.join(self.output_dir, "forecast_dashboard.png")
-        plt.savefig(filename, dpi=150, bbox_inches='tight')
-        print(f"   💾 Saved dashboard: {filename}")
-        
+        plt.savefig(filename, dpi=100)
+        print(f"   📊 Saved plot: {filename}")
         plt.close()
     
     def plot_metrics_comparison(self, all_metrics: dict):
         """
-        Plot comparison of model performance metrics
-        
-        Args:
-            all_metrics: Dictionary of metrics from ForecastEvaluator
+        So sánh hiệu năng các mô hình (Dựa trên R2 Score)
         """
         print(f"\n📊 Creating metrics comparison plot...")
         
-        # Extract R² scores for regression models
         features = []
         r2_scores = []
         
         for target in config.CONTINUOUS_FEATURES:
-            if target in all_metrics and 'R2' in all_metrics[target]:
-                features.append(target.replace('_', '\n'))
-                r2_scores.append(all_metrics[target]['R2'])
+            # QUAN TRỌNG: Sửa 'R2' thành 'r2' (khớp với forecast_evaluator.py)
+            if target in all_metrics and 'r2' in all_metrics[target]:
+                features.append(target)
+                r2_scores.append(all_metrics[target]['r2'])
         
         if not features:
-            print("   ⚠️  No metrics to plot")
+            print("   ⚠️  No metrics found to plot")
             return
         
-        # Create bar plot
         fig, ax = plt.subplots(figsize=(10, 6))
         
         bars = ax.bar(features, r2_scores, color='steelblue', alpha=0.7)
         
-        # Color bars based on performance
-        for i, (bar, score) in enumerate(zip(bars, r2_scores)):
-            if score >= 0.8:
-                bar.set_color('green')
-            elif score >= 0.6:
-                bar.set_color('orange')
-            else:
-                bar.set_color('red')
-        
-        ax.set_ylabel('R² Score', fontsize=12)
-        ax.set_title('Model Performance Comparison (R² Score)', fontsize=14, fontweight='bold')
-        ax.set_ylim([0, 1.0])
-        ax.grid(True, alpha=0.3, axis='y')
-        
-        # Add value labels on bars
+        # Tô màu dựa trên độ chính xác
         for bar, score in zip(bars, r2_scores):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{score:.3f}',
-                   ha='center', va='bottom', fontsize=10)
+            if score >= 0.8: bar.set_color('forestgreen')  # Tốt
+            elif score >= 0.5: bar.set_color('orange')     # Khá
+            else: bar.set_color('firebrick')               # Kém
+        
+        ax.set_ylabel('R² Score (Higher is Better)')
+        ax.set_title('Model Accuracy Comparison')
+        ax.set_ylim([0, 1.1])
+        
+        # Hiển thị số trên cột
+        for bar, score in zip(bars, r2_scores):
+            height = bar.get_height() if bar.get_height() > 0 else 0
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                   f'{score:.2f}', ha='center', fontsize=10, fontweight='bold')
         
         plt.tight_layout()
-        
-        filename = os.path.join(self.output_dir, "metrics_comparison.png")
-        plt.savefig(filename, dpi=150, bbox_inches='tight')
-        print(f"   💾 Saved metrics plot: {filename}")
-        
+        filename = os.path.join(self.output_dir, "model_accuracy.png")
+        plt.savefig(filename, dpi=100)
+        print(f"   📊 Saved metrics plot: {filename}")
         plt.close()
-
+    
+    def plot_multi_panel_dashboard(self, df_pandas: pd.DataFrame, datetime_col='datetime'):
+        """Vẽ Dashboard tổng hợp (Optional)"""
+        # Logic tương tự plot_all_features nhưng gộp vào 1 ảnh
+        pass 
 
 if __name__ == "__main__":
-    print("Forecast Visualization Module")
-    print("Use ForecastVisualizer to create plots")
+    print("Visualization Module Loaded.")

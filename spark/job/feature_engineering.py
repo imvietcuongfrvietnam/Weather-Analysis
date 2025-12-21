@@ -1,35 +1,51 @@
 """
 Feature Engineering - Time Series Features for Weather Forecasting
 Tạo các đặc trưng chuỗi thời gian cho dự đoán thời tiết
+Updated: Compatible with Normalized Data Schema
 """
 
 from pyspark.sql import DataFrame, Window
 from pyspark.sql.functions import (
     col, lag, avg, stddev, sum as spark_sum, max as spark_max,
-    hour, dayofweek, month, when, sin, cos, lit, expr
+    hour, dayofweek, month, when, sin, cos, lit, abs
 )
 import math
-import config
+import sys
+import os
+
+# Thêm đường dẫn để import config nếu cần
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    import config
+except ImportError:
+    # Fallback config nếu không tìm thấy file
+    class Config:
+        LAG_HOURS = [1, 3, 6, 12, 24]
+        ROLLING_WINDOWS = [3, 6, 12, 24]
+    config = Config()
 
 class TimeSeriesFeatureEngineer:
     """Create time series features for weather forecasting"""
     
+    # Danh sách các cột số liệu liên tục cần tạo Lag/Rolling
+    CONTINUOUS_FEATURES = [
+        "temperature", 
+        "humidity", 
+        "pressure", 
+        "wind_speed", 
+        "wind_direction"
+    ]
+
     @staticmethod
     def create_lag_features(df: DataFrame, feature_cols: list, lag_hours: list) -> DataFrame:
         """
-        Create lag features (past values) for time series
-        
-        Args:
-            df: Input DataFrame sorted by datetime
-            feature_cols: List of features to create lags for
-            lag_hours: List of lag intervals in hours
-            
-        Returns:
-            DataFrame with lag features added
+        Tạo các đặc trưng trễ (Lag features)
+        Ví dụ: temperature_lag_1h là nhiệt độ của 1 giờ trước
         """
         print(f"\n🔄 Creating lag features for {len(feature_cols)} features...")
         
-        # Define window spec partitioned by city, ordered by datetime
+        # Cửa sổ trượt theo từng thành phố, sắp xếp theo thời gian
         window_spec = Window.partitionBy("city").orderBy("datetime")
         
         for feature in feature_cols:
@@ -44,22 +60,15 @@ class TimeSeriesFeatureEngineer:
                     lag(col(feature), lag_h).over(window_spec)
                 )
             
-            print(f"   ✅ {feature}: Created lags {lag_hours}")
+            # print(f"   ✅ {feature}: Created lags {lag_hours}")
         
         return df
     
     @staticmethod
     def create_rolling_features(df: DataFrame, feature_cols: list, window_sizes: list) -> DataFrame:
         """
-        Create rolling window statistics (mean, std, sum, max)
-        
-        Args:
-            df: Input DataFrame
-            feature_cols: Features to calculate rolling stats for
-            window_sizes: Window sizes in hours
-            
-        Returns:
-            DataFrame with rolling features
+        Tạo các đặc trưng thống kê trượt (Rolling Window Statistics)
+        Trung bình, độ lệch chuẩn, max, min trong khoảng thời gian
         """
         print(f"\n📊 Creating rolling window features...")
         
@@ -70,59 +79,47 @@ class TimeSeriesFeatureEngineer:
                 continue
             
             for window_h in window_sizes:
-                # Create window spec for this window size
-                # rowsBetween(-window_h, 0) means from window_h rows back to current
+                # rowsBetween(-window_h, 0): Từ window_h dòng trước đến dòng hiện tại
+                # Lưu ý: Đây là row-based window. Nếu dữ liệu bị mất dòng (missing hours), 
+                # nên dùng rangeBetween (time-based) nhưng phức tạp hơn.
                 window_spec = window_spec_base.rowsBetween(-window_h, 0)
                 
-                # Rolling mean
+                # Rolling Mean (Trung bình trượt)
                 df = df.withColumn(
                     f"{feature}_rolling_mean_{window_h}h",
                     avg(col(feature)).over(window_spec)
                 )
                 
-                # Rolling std
+                # Rolling Std Dev (Độ lệch chuẩn trượt - đo độ biến động)
                 df = df.withColumn(
                     f"{feature}_rolling_std_{window_h}h",
                     stddev(col(feature)).over(window_spec)
                 )
                 
-                # For precipitation, also add sum
-                if 'precipitation' in feature:
-                    df = df.withColumn(
-                        f"{feature}_rolling_sum_{window_h}h",
-                        spark_sum(col(feature)).over(window_spec)
-                    )
-                
-                # For wind, also add max
+                # Với gió thì lấy thêm Max (Gió giật)
                 if 'wind' in feature:
                     df = df.withColumn(
                         f"{feature}_rolling_max_{window_h}h",
                         spark_max(col(feature)).over(window_spec)
                     )
             
-            print(f"   ✅ {feature}: Windows {window_sizes}h")
+            # print(f"   ✅ {feature}: Windows {window_sizes}h")
         
         return df
     
     @staticmethod
     def create_time_features(df: DataFrame) -> DataFrame:
         """
-        Create time-based features from datetime
-        
-        Args:
-            df: DataFrame with 'datetime' column
-            
-        Returns:
-            DataFrame with time features
+        Tạo đặc trưng thời gian (Hour, Day, Month, Season...)
         """
         print(f"\n⏰ Creating time-based features...")
         
-        # Extract basic time components
+        # 1. Basic Components
         df = df.withColumn("hour_of_day", hour(col("datetime")))
-        df = df.withColumn("day_of_week", dayofweek(col("datetime")))  # 1=Sunday, 7=Saturday
+        df = df.withColumn("day_of_week", dayofweek(col("datetime")))  # 1=CN, 7=Thứ 7
         df = df.withColumn("month_of_year", month(col("datetime")))
         
-        # Season
+        # 2. Season (Mùa)
         df = df.withColumn(
             "season",
             when(col("month_of_year").isin([12, 1, 2]), "winter")
@@ -131,28 +128,14 @@ class TimeSeriesFeatureEngineer:
             .otherwise("fall")
         )
         
-        # Binary features
-        df = df.withColumn("is_weekend", when(col("day_of_week").isin([1, 7]), 1).otherwise(0))
-        df = df.withColumn(
-            "is_rush_hour",
-            when(
-                ((col("hour_of_day") >= 7) & (col("hour_of_day") <= 9)) |
-                ((col("hour_of_day") >= 17) & (col("hour_of_day") <= 19)),
-                1
-            ).otherwise(0)
-        )
-        df = df.withColumn("is_night", when((col("hour_of_day") >= 20) | (col("hour_of_day") <= 6), 1).otherwise(0))
+        # 3. Cyclical Encoding (Quan trọng cho Model hiểu tính chu kỳ của giờ/ngày)
+        # Giờ 23 và Giờ 0 rất gần nhau, nhưng số học 23 và 0 rất xa. Sin/Cos giải quyết việc này.
         
-        # Cyclical encoding (to capture circular nature of time)
-        # Hour: 0-23 -> sin/cos
+        # Hour: 0-23
         df = df.withColumn("hour_sin", sin(col("hour_of_day") * 2 * math.pi / 24))
         df = df.withColumn("hour_cos", cos(col("hour_of_day") * 2 * math.pi / 24))
         
-        # Day of week: 1-7 -> sin/cos
-        df = df.withColumn("dow_sin", sin((col("day_of_week") - 1) * 2 * math.pi / 7))
-        df = df.withColumn("dow_cos", cos((col("day_of_week") - 1) * 2 * math.pi / 7))
-        
-        # Month: 1-12 -> sin/cos
+        # Month: 1-12
         df = df.withColumn("month_sin", sin((col("month_of_year") - 1) * 2 * math.pi / 12))
         df = df.withColumn("month_cos", cos((col("month_of_year") - 1) * 2 * math.pi / 12))
         
@@ -163,143 +146,111 @@ class TimeSeriesFeatureEngineer:
     @staticmethod
     def create_derived_features(df: DataFrame) -> DataFrame:
         """
-        Create derived meteorological features
-        
-        Args:
-            df: DataFrame with base weather features
-            
-        Returns:
-            DataFrame with derived features
+        Tạo các đặc trưng khí tượng học phái sinh (Derived Features)
+        Dựa trên kiến thức vật lý/khí tượng.
         """
         print(f"\n🌡️  Creating derived meteorological features...")
         
-        # Temperature change rate (compared to 1 hour ago)
-        if 'temp_celsius_lag_1h' in df.columns:
+        # 1. Temperature Change (Biến thiên nhiệt độ so với 1h trước)
+        if 'temperature' in df.columns and 'temperature_lag_1h' in df.columns:
             df = df.withColumn(
                 "temp_change_1h",
-                col("temp_celsius") - col("temp_celsius_lag_1h")
+                col("temperature") - col("temperature_lag_1h")
             )
         
-        # Pressure tendency (rising/falling/stable)
-        if 'pressure_hpa_lag_3h' in df.columns:
+        # 2. Pressure Tendency (Xu hướng áp suất - Dự báo bão/mưa)
+        if 'pressure' in df.columns and 'pressure_lag_3h' in df.columns:
             df = df.withColumn(
                 "pressure_tendency",
-                when(col("pressure_hpa") - col("pressure_hpa_lag_3h") > 2, "rising")
-                .when(col("pressure_hpa") - col("pressure_hpa_lag_3h") < -2, "falling")
+                when(col("pressure") - col("pressure_lag_3h") > 2, "rising")
+                .when(col("pressure") - col("pressure_lag_3h") < -2, "falling")
                 .otherwise("stable")
             )
         
-        # Humidity comfort (deviation from ideal ~50%)
-        if 'humidity_pct' in df.columns:
-            df = df.withColumn(
-                "humidity_comfort",
-                100 - abs(col("humidity_pct") - 50)
-            )
-        
-        # Heat index approximation (feels-like temperature)
-        if 'temp_celsius' in df.columns and 'humidity_pct' in df.columns:
-            # Simplified heat index
+        # 3. Heat Index (Chỉ số nóng bức - Feels Like)
+        # Công thức đơn giản hóa: T + 0.05 * Humidity * (T - 20)
+        if 'temperature' in df.columns and 'humidity' in df.columns:
             df = df.withColumn(
                 "heat_index",
-                col("temp_celsius") + 
-                (0.05 * col("humidity_pct") * (col("temp_celsius") - 20))
+                col("temperature") + 
+                (0.05 * col("humidity") * (col("temperature") - 20))
             )
         
-        # Wind chill approximation
-        if 'temp_celsius' in df.columns and 'wind_speed_kmh' in df.columns:
-            # Simplified wind chill (only for temps below 10°C and wind > 5km/h)
+        # 4. Wind Chill (Chỉ số rét run)
+        # Chỉ tính khi nhiệt độ < 10 và gió > 5
+        if 'temperature' in df.columns and 'wind_speed' in df.columns:
             df = df.withColumn(
                 "wind_chill",
                 when(
-                    (col("temp_celsius") < 10) & (col("wind_speed_kmh") > 5),
-                    col("temp_celsius") - (0.4 * col("wind_speed_kmh"))
-                ).otherwise(col("temp_celsius"))
+                    (col("temperature") < 10) & (col("wind_speed") > 5),
+                    col("temperature") - (0.4 * col("wind_speed"))
+                ).otherwise(col("temperature"))
             )
-        
-        # Precipitation intensity category
-        if 'precipitation_mm' in df.columns:
-            df = df.withColumn(
-                "precip_intensity",
-                when(col("precipitation_mm") == 0, "none")
-                .when(col("precipitation_mm") < 2.5, "light")
-                .when(col("precipitation_mm") < 10, "moderate")
-                .when(col("precipitation_mm") < 50, "heavy")
-                .otherwise("extreme")
-            )
-        
-        print("   ✅ Derived features: temp_change, pressure_tendency, heat_index, wind_chill, etc.")
+            
+        print("   ✅ Derived features: temp_change, pressure_tendency, heat_index, wind_chill")
         
         return df
     
     @staticmethod
     def engineer_all_features(df: DataFrame) -> DataFrame:
         """
-        Apply all feature engineering steps
-        
-        Args:
-            df: Raw DataFrame with base weather data
-            
-        Returns:
-            DataFrame with all engineered features
+        Hàm chính: Chạy toàn bộ quy trình tạo đặc trưng
         """
-        print("\n" + "="*80)
+        print("\n" + "="*60)
         print("🔧 FEATURE ENGINEERING PIPELINE")
-        print("="*80)
+        print("="*60)
         
-        # Make sure data is sorted by datetime
+        # Đảm bảo dữ liệu sắp xếp theo thời gian
         df = df.orderBy("datetime")
         
-        # 1. Time features (no dependencies)
+        # 1. Time Features
         df = TimeSeriesFeatureEngineer.create_time_features(df)
         
-        # 2. Lag features
+        # 2. Lag Features (Dùng danh sách cột chuẩn)
+        cols_to_lag = [c for c in TimeSeriesFeatureEngineer.CONTINUOUS_FEATURES if c in df.columns]
         df = TimeSeriesFeatureEngineer.create_lag_features(
             df,
-            config.CONTINUOUS_FEATURES,
+            cols_to_lag,
             config.LAG_HOURS
         )
         
-        # 3. Rolling window features
+        # 3. Rolling Features
         df = TimeSeriesFeatureEngineer.create_rolling_features(
             df,
-            config.CONTINUOUS_FEATURES,
+            cols_to_lag,
             config.ROLLING_WINDOWS
         )
         
-        # 4. Derived features (depend on lags)
+        # 4. Derived Features
         df = TimeSeriesFeatureEngineer.create_derived_features(df)
         
-        # 5. Cache the result (important for iterative operations)
-        df = df.cache()
+        # Cache kết quả để các bước sau (Training) chạy nhanh hơn
+        # df = df.cache() # Cẩn thận nếu RAM yếu
         
         print("\n✅ Feature engineering complete!")
         print(f"   Total columns: {len(df.columns)}")
-        print("="*80 + "\n")
+        print("="*60 + "\n")
         
         return df
     
     @staticmethod
     def get_feature_columns(df: DataFrame, exclude_targets: bool = True) -> list:
         """
-        Get list of feature columns (excluding target and metadata columns)
-        
-        Args:
-            df: DataFrame with engineered features
-            exclude_targets: Whether to exclude target columns
-            
-        Returns:
-            List of feature column names
+        Lấy danh sách các cột dùng để Train Model (bỏ cột ID, Time, Target)
         """
-        # Columns to exclude from features
-        exclude_cols = ['datetime', 'city']
+        # Các cột định danh/metadata không dùng để train
+        exclude_cols = ['datetime', 'city', 'weather_desc', 'weather_desc_clean']
+        
+        # Các cột Target (Biến mục tiêu cần dự đoán)
+        targets = ["temperature", "humidity", "pressure", "wind_speed", "wind_direction", "precipitation_mm"]
         
         if exclude_targets:
-            exclude_cols.extend(config.ALL_TARGET_FEATURES)
+            exclude_cols.extend(targets)
         
-        # Also exclude any categorical columns that need encoding
+        # Các cột String chưa encode cũng bỏ qua (chỉ lấy số)
         exclude_cols.extend(['season', 'pressure_tendency', 'precip_intensity'])
         
-        # Get all numeric columns that aren't in exclude list
+        # Lọc lấy các cột số còn lại
         feature_cols = [
             field.name for field in df.schema.fields
             if field.name not in exclude_cols
@@ -307,8 +258,3 @@ class TimeSeriesFeatureEngineer:
         ]
         
         return feature_cols
-
-
-if __name__ == "__main__":
-    print("Feature Engineering Module")
-    print("Use engineer_all_features() to create all time series features")

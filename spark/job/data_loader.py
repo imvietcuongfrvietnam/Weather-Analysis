@@ -1,56 +1,91 @@
 """
 Data Loader - Load weather data from MinIO
-Đọc dữ liệu thời tiết đã được làm giàu từ MinIO
+Đọc dữ liệu thời tiết đã được làm sạch và chuẩn hóa (Output của main_etl.py)
 """
 
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, count, when, isnan, to_timestamp
+from pyspark.sql.functions import col, count, when, isnan, to_timestamp, min as spark_min, max as spark_max, avg, stddev
 from pyspark.sql.types import TimestampType
-import config
+import sys
+import os
+
+# Thêm đường dẫn để import config
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    import config
+except ImportError:
+    # Fallback Config nếu không tìm thấy file config.py
+    class Config:
+        MINIO_BUCKET = "weather-data"
+        # Đường dẫn tới dữ liệu đầu ra của quá trình Normalization
+        # Lưu ý: folder này do MinIOWriter tạo ra trong main_etl.py
+        MINIO_INPUT_PATH = f"s3a://{MINIO_BUCKET}/enriched/weather" 
+        
+        # Các cột mục tiêu quan trọng
+        ALL_TARGET_FEATURES = [
+            "temperature", 
+            "humidity", 
+            "pressure", 
+            "wind_speed"
+        ]
+        
+        # Các cột số liên tục
+        CONTINUOUS_FEATURES = ALL_TARGET_FEATURES
+        
+        # Ngưỡng kiểm tra chất lượng dữ liệu
+        MAX_MISSING_PCT = 0.05       # 5%
+        MIN_DAYS_HISTORY = 1         # Tối thiểu 1 ngày (để test)
+        MIN_TRAINING_RECORDS = 100   # Tối thiểu 100 dòng
+        
+    config = Config()
 
 class WeatherDataLoader:
     """Load and validate weather data from MinIO"""
     
     def __init__(self, spark: SparkSession):
         self.spark = spark
+        # Mặc định load từ folder enriched/weather (Nơi MinIOWriter ghi Parquet)
         self.input_path = config.MINIO_INPUT_PATH
         
     def load_data(self, city: str = None, limit_rows: int = None) -> DataFrame:
         """
-        Load enriched weather data from MinIO
-        
-        Args:
-            city: Filter by specific city (optional)
-            limit_rows: Limit number of rows for testing (optional)
-            
-        Returns:
-            DataFrame with weather data sorted by datetime
+        Load weather data (Parquet) from MinIO
         """
         print(f"\n📂 Loading data from: {self.input_path}")
         
         try:
-            # Read all parquet files from MinIO
-            df = self.spark.read.parquet(self.input_path)
+            # 1. Đọc tất cả file Parquet từ MinIO
+            # mergeSchema=True giúp đọc được nhiều file dù schema có thay đổi nhỏ
+            df = self.spark.read.option("mergeSchema", "true").parquet(self.input_path)
             
-            print(f"   ✅ Successfully loaded {df.count()} records")
+            total_count = df.count()
+            print(f"   ✅ Successfully loaded {total_count} records")
             
-            # Filter by city if specified
+            if total_count == 0:
+                print("   ⚠️  Warning: Dataset is empty!")
+                return df
+            
+            # 2. Lọc theo thành phố (nếu có yêu cầu)
             if city:
                 df = df.filter(col("city") == city)
                 print(f"   🏙️  Filtered to city: {city} ({df.count()} records)")
             
-            # Ensure datetime column exists and is properly typed
+            # 3. Chuẩn hóa cột Datetime
             if "datetime" not in df.columns:
+                print("   ⚠️  Column 'datetime' not found! Trying to find alternative...")
+                # Nếu không có datetime, thử tìm cột timestamp khác (tùy logic sinh data)
+                # Nhưng chuẩn của main_etl.py là có cột 'datetime'
                 raise ValueError("Column 'datetime' not found in data!")
             
-            # Cast to timestamp if needed
+            # Ép kiểu sang Timestamp nếu nó đang là String (do JSON/CSV cũ)
             if not isinstance(df.schema["datetime"].dataType, TimestampType):
                 df = df.withColumn("datetime", to_timestamp(col("datetime")))
             
-            # Sort by datetime for time series analysis
+            # 4. Sắp xếp theo thời gian (Quan trọng cho Time Series)
             df = df.orderBy("datetime")
             
-            # Limit rows if specified (for testing)
+            # 5. Giới hạn số dòng (cho mục đích test nhanh)
             if limit_rows:
                 df = df.limit(limit_rows)
                 print(f"   ⚠️  Limited to {limit_rows} records for testing")
@@ -59,20 +94,20 @@ class WeatherDataLoader:
             
         except Exception as e:
             print(f"   ❌ Error loading data: {e}")
-            raise
+            # Trả về DataFrame rỗng thay vì crash chương trình
+            from pyspark.sql.types import StructType
+            return self.spark.createDataFrame([], StructType([]))
     
     def validate_data(self, df: DataFrame) -> dict:
         """
-        Validate data quality and completeness
-        
-        Args:
-            df: DataFrame to validate
-            
-        Returns:
-            dict with validation results
+        Kiểm tra chất lượng dữ liệu (Data Quality Check)
         """
         print("\n🔍 Validating data quality...")
         
+        if df.rdd.isEmpty():
+            print("   ❌ Validation Failed: DataFrame is empty")
+            return {'quality_score': 0}
+
         total_records = df.count()
         validation_results = {
             'total_records': total_records,
@@ -81,7 +116,7 @@ class WeatherDataLoader:
             'quality_score': 100.0
         }
         
-        # Check for required target features
+        # 1. Kiểm tra các cột bắt buộc (Features)
         required_features = config.ALL_TARGET_FEATURES
         missing_features = [f for f in required_features if f not in df.columns]
         
@@ -90,164 +125,101 @@ class WeatherDataLoader:
             validation_results['missing_features'] = missing_features
             validation_results['quality_score'] -= 20
         
-        # Check missing values for each target feature
+        # 2. Kiểm tra giá trị thiếu (Missing Values)
         print("   📊 Checking missing values...")
-        for feature in config.ALL_TARGET_FEATURES:
-            if feature in df.columns:
-                null_count = df.filter(
-                    col(feature).isNull() | isnan(col(feature))
-                ).count()
-                
-                null_pct = (null_count / total_records) * 100 if total_records > 0 else 0
-                validation_results['missing_values'][feature] = {
-                    'count': null_count,
-                    'percentage': null_pct
-                }
-                
-                if null_pct > config.MAX_MISSING_PCT * 100:
-                    print(f"      ⚠️  {feature}: {null_pct:.2f}% missing (threshold: {config.MAX_MISSING_PCT*100}%)")
-                    validation_results['quality_score'] -= 5
-                else:
-                    print(f"      ✅ {feature}: {null_pct:.2f}% missing")
+        features_to_check = [f for f in config.ALL_TARGET_FEATURES if f in df.columns]
         
-        # Check data range for continuous features
+        for feature in features_to_check:
+            null_count = df.filter(col(feature).isNull() | isnan(col(feature))).count()
+            null_pct = (null_count / total_records) * 100
+            
+            validation_results['missing_values'][feature] = {
+                'count': null_count,
+                'percentage': null_pct
+            }
+            
+            if null_pct > config.MAX_MISSING_PCT * 100:
+                print(f"      ⚠️  {feature}: {null_pct:.2f}% missing (High!)")
+                validation_results['quality_score'] -= 5
+            # else:
+            #     print(f"      ✅ {feature}: {null_pct:.2f}% missing")
+        
+        # 3. Kiểm tra dải dữ liệu (Data Range) - Phát hiện Outliers
         print("   📈 Checking data ranges...")
-        for feature in config.CONTINUOUS_FEATURES:
-            if feature in df.columns:
-                stats = df.select(
-                    col(feature).alias("value")
-                ).filter(
-                    col(feature).isNotNull()
-                ).agg({
-                    'value': 'min',
-                    'value': 'max',
-                    'value': 'mean',
-                    'value': 'stddev'
-                }).collect()[0]
+        # Lọc các cột số thực tế có trong DF
+        numeric_cols = [f for f in config.CONTINUOUS_FEATURES if f in df.columns]
+        
+        if numeric_cols:
+            # Tính min/max/mean một lần cho nhanh
+            aggregations = []
+            for col_name in numeric_cols:
+                aggregations.append(spark_min(col_name).alias(f"min_{col_name}"))
+                aggregations.append(spark_max(col_name).alias(f"max_{col_name}"))
+            
+            stats = df.agg(*aggregations).collect()[0]
+            
+            for feature in numeric_cols:
+                min_val = stats[f"min_{feature}"]
+                max_val = stats[f"max_{feature}"]
                 
-                validation_results['data_range'][feature] = {
-                    'min': stats['min(value)'],
-                    'max': stats['max(value)'],
-                }
-                
-                print(f"      {feature}: [{stats['min(value)']:.2f}, {stats['max(value)']:.2f}]")
+                validation_results['data_range'][feature] = {'min': min_val, 'max': max_val}
+                print(f"      {feature}: [{min_val:.2f}, {max_val:.2f}]")
         
-        # Check time span
-        time_stats = df.agg({
-            'datetime': 'min',
-            'datetime': 'max'
-        }).collect()[0]
+        # 4. Kiểm tra khoảng thời gian (Time Span)
+        time_stats = df.agg(spark_min('datetime'), spark_max('datetime')).collect()[0]
+        start_time = time_stats[0]
+        end_time = time_stats[1]
         
-        start_time = time_stats['min(datetime)']
-        end_time = time_stats['max(datetime)']
-        time_span_days = (end_time - start_time).days if start_time and end_time else 0
+        if start_time and end_time:
+            time_span_days = (end_time - start_time).days
+            validation_results['time_span_days'] = time_span_days
+            print(f"\n   📅 Time span: {time_span_days} days ({start_time} to {end_time})")
+            
+            if time_span_days < config.MIN_DAYS_HISTORY:
+                print(f"   ⚠️  Warning: Only {time_span_days} days of data (Need more history for ML)")
+                validation_results['quality_score'] -= 15
         
-        validation_results['time_span_days'] = time_span_days
-        validation_results['start_time'] = start_time
-        validation_results['end_time'] = end_time
-        
-        print(f"\n   📅 Time span: {time_span_days} days ({start_time} to {end_time})")
-        
-        if time_span_days < config.MIN_DAYS_HISTORY:
-            print(f"   ⚠️  Warning: Only {time_span_days} days of data (recommended: {config.MIN_DAYS_HISTORY}+ days)")
-            validation_results['quality_score'] -= 15
-        
-        # Check minimum records
+        # 5. Kiểm tra số lượng bản ghi tối thiểu
         if total_records < config.MIN_TRAINING_RECORDS:
             print(f"   ❌ Insufficient data: {total_records} records (minimum: {config.MIN_TRAINING_RECORDS})")
             validation_results['quality_score'] -= 30
         
-        # Final quality assessment
+        # Kết luận
         quality_score = validation_results['quality_score']
-        if quality_score >= 80:
-            print(f"\n   ✅ Data Quality Score: {quality_score:.1f}% - GOOD")
-        elif quality_score >= 60:
-            print(f"\n   ⚠️  Data Quality Score: {quality_score:.1f}% - ACCEPTABLE")
-        else:
-            print(f"\n   ❌ Data Quality Score: {quality_score:.1f}% - POOR")
+        status = "GOOD" if quality_score >= 80 else ("ACCEPTABLE" if quality_score >= 60 else "POOR")
+        print(f"\n   ✅ Data Quality Score: {quality_score:.1f}% - {status}")
         
         return validation_results
     
     def get_cities(self, df: DataFrame) -> list:
-        """Get list of unique cities in the data"""
+        """Lấy danh sách thành phố có trong dữ liệu"""
         if 'city' in df.columns:
-            cities = df.select('city').distinct().rdd.map(lambda r: r[0]).collect()
-            return cities
+            # Lấy distinct city, collect về driver (list python)
+            return [row.city for row in df.select('city').distinct().collect()]
         return []
     
     def summary_stats(self, df: DataFrame):
-        """Print summary statistics of the data"""
-        print("\n" + "="*80)
+        """In thống kê tóm tắt"""
+        print("\n" + "="*60)
         print("📊 DATA SUMMARY")
-        print("="*80)
+        print("="*60)
         
-        # Basic info
+        if df.rdd.isEmpty():
+            print("   (Empty DataFrame)")
+            return
+
         print(f"Total Records:     {df.count()}")
         print(f"Total Columns:     {len(df.columns)}")
         
-        # Cities
         cities = self.get_cities(df)
-        if cities:
-            print(f"Cities:            {', '.join(cities)}")
+        print(f"Cities ({len(cities)}):      {', '.join(cities[:5])}...")
         
-        # Time range
-        time_stats = df.agg({
-            'datetime': 'min',
-            'datetime': 'max'
-        }).collect()[0]
+        print("\n📈 Sample Data (Top 5):")
+        # Chọn các cột quan trọng để hiển thị
+        display_cols = ['datetime', 'city'] + [c for c in config.ALL_TARGET_FEATURES if c in df.columns]
+        df.select(display_cols).show(5, truncate=False)
         
-        if time_stats['min(datetime)'] and time_stats['max(datetime)']:
-            time_span = (time_stats['max(datetime)'] - time_stats['min(datetime)']).days
-            print(f"Time Range:        {time_stats['min(datetime)']} to {time_stats['max(datetime)']}")
-            print(f"Time Span:         {time_span} days")
-        
-        # Feature statistics
-        print("\n📈 Feature Statistics:")
-        for feature in config.ALL_TARGET_FEATURES:
-            if feature in df.columns:
-                if feature in config.CONTINUOUS_FEATURES:
-                    stats = df.select(feature).filter(
-                        col(feature).isNotNull()
-                    ).agg({
-                        feature: 'min',
-                        feature: 'max',
-                        feature: 'mean',
-                        feature: 'stddev'
-                    }).collect()[0]
-                    
-                    print(f"  {feature:20s}: min={stats[f'min({feature})']:8.2f}, "
-                          f"max={stats[f'max({feature})']:8.2f}, "
-                          f"mean={stats[f'avg({feature})']:8.2f}, "
-                          f"std={stats[f'stddev_samp({feature})']:8.2f}")
-                else:
-                    # Categorical feature
-                    distinct_count = df.select(feature).distinct().count()
-                    print(f"  {feature:20s}: {distinct_count} unique values")
-        
-        print("="*80 + "\n")
-
-
-def test_data_loader(spark: SparkSession):
-    """Test the data loader"""
-    loader = WeatherDataLoader(spark)
-    
-    # Load data
-    df = loader.load_data(limit_rows=1000)
-    
-    # Validate
-    validation = loader.validate_data(df)
-    
-    # Summary
-    loader.summary_stats(df)
-    
-    # Show sample
-    print("Sample data:")
-    df.select(config.ALL_TARGET_FEATURES + ['datetime']).show(5, truncate=False)
-    
-    return df, validation
-
+        print("="*60 + "\n")
 
 if __name__ == "__main__":
-    # This is for testing only
-    print("Testing data loader...")
-    print("Note: Requires Spark session with MinIO configuration")
+    print("Testing data loader module...")

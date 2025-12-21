@@ -1,169 +1,91 @@
 """
 Data Cleaning Functions
-Clean data từ 4 nguồn: weather, 311, taxi, collisions
+Chuyên biệt cho dữ liệu thời tiết (Weather Data)
 """
 
 from pyspark.sql import DataFrame
-from pyspark.sql.functions import *
+from pyspark.sql.functions import col, to_timestamp, trim, initcap, when
 
 class DataCleaner:
     
     @staticmethod
     def clean_weather_data(df: DataFrame) -> DataFrame:
-        """Clean weather data"""
+        """
+        Làm sạch dữ liệu thời tiết
+        Input columns: datetime, City, temperature, humidity, pressure, weather_desc, wind_direction, wind_speed
+        """
         print("🧹 Cleaning weather data...")
         
-        # Cast numeric columns from string to proper types (when reading from CSV)
-        numeric_cols = ["temperature", "humidity", "pressure", "wind_speed", "rain_1h", "snow_1h"]
+        # 1. Đổi tên cột cho chuẩn (City -> city)
+        if "City" in df.columns:
+            df = df.withColumnRenamed("City", "city")
+            
+        # 2. Chuyển đổi Datetime (Quan trọng nhất)
+        # Input đang là String (do Schema định nghĩa), cần chuyển sang Timestamp để tính toán
+        df = df.withColumn("datetime", to_timestamp(col("datetime")))
+        
+        # 3. Ép kiểu số (Double) cho các cột chỉ số
+        numeric_cols = ["temperature", "humidity", "pressure", "wind_speed", "wind_direction"]
         for col_name in numeric_cols:
             if col_name in df.columns:
                 df = df.withColumn(col_name, col(col_name).cast("double"))
         
-        # Remove nulls in critical columns
-        df = df.dropna(subset=["datetime", "temperature"])
+        # 4. Xóa dữ liệu rác (Null) ở các trường quan trọng
+        # Nếu không có thời gian, thành phố hoặc nhiệt độ -> Dòng này vô nghĩa
+        df = df.dropna(subset=["datetime", "city", "temperature"])
         
-        # Remove duplicates
-        df = df.dropDuplicates(["datetime", "city"])
+        # 5. Xử lý chuỗi (String Cleaning)
+        # weather_desc: bỏ khoảng trắng thừa, viết hoa chữ cái đầu (VD: " clear sky " -> "Clear Sky")
+        if "weather_desc" in df.columns:
+            df = df.withColumn("weather_desc", initcap(trim(col("weather_desc"))))
+            
+        if "city" in df.columns:
+            df = df.withColumn("city", trim(col("city")))
+
+        # 6. Validate dữ liệu (Business Logic)
         
-        # Validate temperature range (Kelvin: 200-350)
-        df = df.filter((col("temperature") >= 200) & (col("temperature") <= 350))
+        # Nhiệt độ (C): Chặn các giá trị vô lý (Ví dụ: -100 độ hoặc 100 độ)
+        # Giả định dữ liệu đầu vào là Celsius (-50 đến 60 độ là ngưỡng an toàn trên trái đất)
+        df = df.filter((col("temperature") >= -50) & (col("temperature") <= 60))
         
-        # Validate humidity (0-100%)
+        # Độ ẩm (%): Phải từ 0 đến 100
         df = df.filter((col("humidity") >= 0) & (col("humidity") <= 100))
         
-        # Validate pressure (900-1100 hPa)
-        df = df.filter((col("pressure") >= 900) & (col("pressure") <= 1100))
+        # Áp suất (hPa): Thường từ 870 đến 1085 (kỷ lục thế giới). Lấy rộng ra 800-1200.
+        df = df.filter((col("pressure") >= 800) & (col("pressure") <= 1200))
         
-        # Fill missing precipitation with 0
-        df = df.fillna({"rain_1h": 0.0, "snow_1h": 0.0})
+        # Tốc độ gió: Không thể âm
+        df = df.filter(col("wind_speed") >= 0)
         
-        print(f"   ✅ Weather data cleaned: {df.count()} records")
+        # Hướng gió: 0 - 360 độ
+        df = df.filter((col("wind_direction") >= 0) & (col("wind_direction") <= 360))
+
+        # 7. Xử lý trùng lặp (Deduplication)
+        # Nếu 1 thành phố có 2 bản tin trong cùng 1 thời điểm -> Giữ 1 cái
+        # Lưu ý: Trong Streaming, dropDuplicates cần watermark, nhưng ở đây ta làm clean mức row cơ bản
+        df = df.dropDuplicates(["datetime", "city"])
+        
+        # Log debug số lượng (Lưu ý: count() trong streaming có thể gây chậm, chỉ dùng khi debug)
+        # print(f"   ✅ Weather data cleaned.") 
+        
         return df
-    
-    @staticmethod
-    def clean_311_data(df: DataFrame) -> DataFrame:
-        """Clean 311 service requests"""
-        print("🧹 Cleaning 311 data...")
-        
-        # Cast numeric columns from string to proper types
-        numeric_cols = ["latitude", "longitude"]
-        for col_name in numeric_cols:
-            if col_name in df.columns:
-                df = df.withColumn(col_name, col(col_name).cast("double"))
-        
-        # Remove nulls
-        df = df.dropna(subset=["unique_key", "created_date"])
-        
-        # Remove duplicates
-        df = df.dropDuplicates(["unique_key"])
-        
-        # Clean text fields
-        df = df.withColumn("complaint_type", trim(col("complaint_type")))
-        df = df.withColumn("borough", upper(trim(col("borough"))))
-        
-        # Validate coordinates
-        df = df.filter(
-            (col("latitude").between(40.4, 41.0)) &
-            (col("longitude").between(-74.3, -73.7))
-        )
-        
-        print(f"   ✅ 311 data cleaned: {df.count()} records")
-        return df
-    
-    @staticmethod
-    def clean_taxi_data(df: DataFrame) -> DataFrame:
-        """Clean taxi trip data"""
-        print("🧹 Cleaning taxi data...")
-        
-        # Cast numeric columns from string to proper types
-        numeric_cols = ["trip_distance", "fare_amount", "passenger_count", "pickup_longitude", 
-                       "pickup_latitude", "dropoff_longitude", "dropoff_latitude", 
-                       "extra", "mta_tax", "tip_amount", "tolls_amount", "total_amount"]
-        for col_name in numeric_cols:
-            if col_name in df.columns:
-                df = df.withColumn(col_name, col(col_name).cast("double"))
-        
-        # Cast integer columns
-        int_cols = ["VendorID", "passenger_count", "RatecodeID", "payment_type"]
-        for col_name in int_cols:
-            if col_name in df.columns:
-                df = df.withColumn(col_name, col(col_name).cast("int"))
-        
-        # Remove nulls
-        df = df.dropna(subset=["tpep_pickup_datetime", "tpep_dropoff_datetime"])
-        
-        # Remove invalid trips (negative duration or distance)
-        df = df.filter(col("trip_distance") > 0)
-        df = df.filter(col("tpep_dropoff_datetime") > col("tpep_pickup_datetime"))
-        
-        # Remove outliers in fare
-        df = df.filter((col("fare_amount") > 0) & (col("fare_amount") < 500))
-        
-        # Validate passenger count
-        df = df.filter((col("passenger_count") >= 1) & (col("passenger_count") <= 6))
-        
-        # Validate coordinates
-        df = df.filter(
-            (col("pickup_latitude").between(40.4, 41.0)) &
-            (col("pickup_longitude").between(-74.3, -73.7))
-        )
-        
-        print(f"   ✅ Taxi data cleaned: {df.count()} records")
-        return df
-    
-    @staticmethod
-    def clean_collision_data(df: DataFrame) -> DataFrame:
-        """Clean collision data"""
-        print("🧹 Cleaning collision data...")
-        
-        # Cast numeric columns from string to proper types
-        numeric_cols = ["latitude", "longitude"]
-        for col_name in numeric_cols:
-            if col_name in df.columns:
-                df = df.withColumn(col_name, col(col_name).cast("double"))
-        
-        # Cast integer columns for injury/death counts
-        injury_cols = [
-            "number_of_persons_injured", "number_of_persons_killed",
-            "number_of_pedestrians_injured", "number_of_cyclist_injured",
-            "number_of_motorist_injured"
-        ]
-        for col_name in injury_cols:
-            if col_name in df.columns:
-                df = df.withColumn(col_name, col(col_name).cast("int"))
-        
-        # Remove nulls (now check for crash_datetime since we merged date+time in generate_data.py)
-        if "crash_datetime" in df.columns:
-            df = df.dropna(subset=["crash_datetime"])
-        else:
-            df = df.dropna(subset=["crash_date", "crash_time"])
-        
-        # Clean borough names
-        df = df.withColumn("borough", upper(trim(col("borough"))))
-        
-        # Ensure injury/death counts are non-negative
-        for col_name in injury_cols:
-            if col_name in df.columns:
-                df = df.withColumn(col_name, when(col(col_name) < 0, 0).otherwise(col(col_name)))
-        
-        # Validate coordinates
-        df = df.filter(
-            (col("latitude").between(40.4, 41.0)) &
-            (col("longitude").between(-74.3, -73.7))
-        )
-        
-        print(f"   ✅ Collision data cleaned: {df.count()} records")
-        return df
-    
+
     @staticmethod
     def remove_outliers_iqr(df: DataFrame, column: str) -> DataFrame:
-        """Remove outliers using IQR method"""
-        quantiles = df.approxQuantile(column, [0.25, 0.75], 0.05)
-        q1, q3 = quantiles[0], quantiles[1]
-        iqr = q3 - q1
-        lower_bound = q1 - 1.5 * iqr
-        upper_bound = q3 + 1.5 * iqr
-        
-        return df.filter(
-            (col(column) >= lower_bound) & (col(column) <= upper_bound)
-        )
+        """
+        Loại bỏ ngoại lai bằng phương pháp IQR (Dùng cho Batch Job/ML)
+        Không khuyến nghị dùng cho Streaming vì cần tính toán toàn cục
+        """
+        try:
+            quantiles = df.approxQuantile(column, [0.25, 0.75], 0.05)
+            q1, q3 = quantiles[0], quantiles[1]
+            iqr = q3 - q1
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+            
+            return df.filter(
+                (col(column) >= lower_bound) & (col(column) <= upper_bound)
+            )
+        except Exception as e:
+            print(f"⚠️ Không thể lọc Outlier cho cột {column}: {e}")
+            return df

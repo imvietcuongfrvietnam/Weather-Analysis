@@ -1,5 +1,4 @@
 from airflow import DAG
-# --- ĐÃ THÊM IMPORT THIẾU Ở ĐÂY ---
 from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import KubernetesPodOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils.dates import days_ago
@@ -17,10 +16,6 @@ with DAG(
     tags=['setup', 'weather'],
 ) as dag:
 
-    # 1. Tạo bảng Business trong Postgres (weather_predictions)
-    # Lưu ý: Cần cấu hình Connection ID 'weather_postgres_conn' trong Airflow UI trước
-    # Hoặc nếu lười cấu hình, bạn có thể dùng KubernetesPodOperator để chạy script python setup_db
-    
     create_table_sql = """
     CREATE TABLE IF NOT EXISTS weather_predictions (
         city VARCHAR(50),
@@ -34,8 +29,6 @@ with DAG(
     );
     """
 
-    # Ở đây mình dùng KubernetesPodOperator chạy script python để tạo bảng
-    # Vì dùng PostgresOperator đòi hỏi phải setup Connection trong UI phức tạp hơn
     init_db_task = KubernetesPodOperator(
         task_id='init_postgres_table',
         name='init-db-job',
@@ -64,13 +57,11 @@ except Exception as e:
         is_delete_operator_pod=True,
     )
 
-    # 2. Sau khi tạo bảng xong -> Kích hoạt Streaming Job
     trigger_streaming = TriggerDagRunOperator(
         task_id='trigger_streaming_dag',
         trigger_dag_id='weather_spark_streaming_etl',
     )
     
-    # 3. Kích hoạt ML Job chạy lần đầu tiên luôn
     trigger_ml = TriggerDagRunOperator(
         task_id='trigger_ml_dag',
         trigger_dag_id='weather_spark_ml_forecast',

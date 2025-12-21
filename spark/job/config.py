@@ -1,142 +1,121 @@
 """
 Weather Forecasting ML - Configuration
-Cấu hình cho hệ thống dự đoán thời tiết 7 ngày
+Cấu hình cho hệ thống dự đoán thời tiết
+Updated: Standardized Column Names & Service Hosts
 """
 
 import os
-import sys
 
 # ========================================
-# KUBERNETES COMPATIBILITY SETUP
+# 1. MINIO CONFIGURATION
 # ========================================
-# Khi chạy trong K8s, ta ưu tiên lấy cấu hình từ Biến môi trường (Environment Variables)
-# Các giá trị default bên dưới được sửa để khớp với tên Service trong K8s
-
-# ========================================
-# MINIO CONFIGURATION
-# ========================================
-# SỬA: Default host đổi thành tên Service trong K8s để tránh lỗi kết nối
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "weather-minio:9000")
-# Lưu ý: Nếu chạy Local (ngoài K8s), bạn cần set env var: export MINIO_ENDPOINT=localhost:9000
-
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")       # Khớp với YAML
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "password123") # Khớp với YAML
+# K8s Service: "weather-minio", Localhost fallback: "localhost"
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "password123")
 MINIO_SECURE = False
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "weather-data")
 
-# MinIO Paths
+# Paths
+# Input: Lấy từ folder output của main_etl.py
 MINIO_INPUT_PATH = f"s3a://{MINIO_BUCKET}/enriched/weather/"
 MINIO_OUTPUT_PATH = f"s3a://{MINIO_BUCKET}/ml/forecasts/"
 MINIO_MODEL_PATH = f"s3a://{MINIO_BUCKET}/ml/models/"
 
-# Spark S3A Configuration
-SPARK_S3A_CONFIG = {
-    "spark.hadoop.fs.s3a.endpoint": f"http://{MINIO_ENDPOINT}" if not MINIO_SECURE else f"https://{MINIO_ENDPOINT}",
+# Spark S3 Configuration (Tên biến phải khớp với spark_ml_job.py)
+SPARK_S3_CONFIG = {
+    "spark.hadoop.fs.s3a.endpoint": f"http://{MINIO_ENDPOINT}",
     "spark.hadoop.fs.s3a.access.key": MINIO_ACCESS_KEY,
     "spark.hadoop.fs.s3a.secret.key": MINIO_SECRET_KEY,
     "spark.hadoop.fs.s3a.path.style.access": "true",
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
-    "spark.hadoop.fs.s3a.connection.ssl.enabled": "true" if MINIO_SECURE else "false",
-    # Tối ưu cho MinIO
-    "spark.hadoop.fs.s3a.fast.upload": "true",
-    "spark.hadoop.fs.s3a.committer.name": "directory",
-    "spark.hadoop.fs.s3a.committer.staging.conflict-mode": "replace"
+    "spark.hadoop.fs.s3a.connection.ssl.enabled": "false",
+    "spark.hadoop.fs.s3a.fast.upload": "true"
 }
 
 # ========================================
-# POSTGRESQL CONFIGURATION
+# 2. POSTGRESQL CONFIGURATION
 # ========================================
-# SỬA: Default host đổi thành tên Service trong K8s
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "weather-postgresql") 
-# Lưu ý: Nếu chạy Local, set env var: export POSTGRES_HOST=localhost
-
+# K8s Service: "weather-postgres", Localhost fallback: "localhost"
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_DB = os.getenv("POSTGRES_DB", "weather_db")             # Khớp với YAML
-POSTGRES_USER = os.getenv("POSTGRES_USER", "weather_user")       # Khớp với YAML
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "weather_pass")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "weather_forecast")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
 POSTGRES_TABLE = os.getenv("POSTGRES_TABLE", "weather_predictions")
 
-# JDBC URL for Spark
 POSTGRES_JDBC_URL = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-POSTGRES_JDBC_DRIVER = "org.postgresql.Driver"
-
 POSTGRES_PROPERTIES = {
     "user": POSTGRES_USER,
     "password": POSTGRES_PASSWORD,
-    "driver": POSTGRES_JDBC_DRIVER
+    "driver": "org.postgresql.Driver"
 }
-
-POSTGRES_WRITE_MODE = os.getenv("POSTGRES_WRITE_MODE", "append")
+POSTGRES_WRITE_MODE = "append"
 
 # ========================================
-# CÁC PHẦN LOGIC ML GIỮ NGUYÊN
+# 3. ML FEATURE CONFIGURATION (QUAN TRỌNG)
 # ========================================
-# ... (Giữ nguyên phần Forecasting Parameters, Feature Engineering, Model Parameters như cũ) ...
-FORECAST_HORIZON_HOURS = 168
-FORECAST_INTERVALS = [1, 6, 12, 24, 48, 72, 120, 168]
+# Tên cột phải KHỚP CHÍNH XÁC với dữ liệu từ main_etl.py (Normalize Step)
 
-LAG_HOURS = [1, 3, 6, 12, 24, 48]
-ROLLING_WINDOWS = [6, 12, 24]
-
-CONTINUOUS_FEATURES = ['temp_celsius', 'humidity_pct', 'pressure_hpa', 'wind_speed_kmh', 'precipitation_mm']
-CATEGORICAL_FEATURES = ['weather_condition']
-ALL_TARGET_FEATURES = CONTINUOUS_FEATURES + CATEGORICAL_FEATURES
-
-BASE_FEATURES = [
-    'datetime', 'city', 'temperature', 'temp_celsius', 'temp_fahrenheit',
-    'humidity', 'humidity_pct', 'pressure', 'pressure_hpa',
-    'wind_speed', 'wind_speed_kmh', 'wind_direction',
-    'precipitation_mm', 'rain_1h', 'snow_1h',
-    'weather_description', 'weather_condition', 'weather_severity', 'clouds_all'
+# Các biến liên tục (Số)
+CONTINUOUS_FEATURES = [
+    'temperature',      # Cũ: temp_celsius
+    'humidity',         # Cũ: humidity_pct
+    'pressure',         # Cũ: pressure_hpa
+    'wind_speed',       # Cũ: wind_speed_kmh
+    'precipitation_mm'  # Giữ nguyên
 ]
 
+# Các biến phân loại (Chữ)
+CATEGORICAL_FEATURES = ['weather_desc'] # Cũ: weather_condition
+
+ALL_TARGET_FEATURES = CONTINUOUS_FEATURES + CATEGORICAL_FEATURES
+
+# Feature Engineering Params
+LAG_HOURS = [1, 3, 6, 12, 24]
+ROLLING_WINDOWS = [6, 12, 24]
+
+# Model Configuration
 TRAIN_TEST_SPLIT = 0.8
 RANDOM_SEED = 42
 
-GBT_PARAMS = {'maxIter': 100, 'maxDepth': 6, 'stepSize': 0.1, 'subsamplingRate': 0.8}
-RF_REGRESSION_PARAMS = {'numTrees': 100, 'maxDepth': 8, 'minInstancesPerNode': 1, 'subsamplingRate': 0.8}
-RF_CLASSIFICATION_PARAMS = {'numTrees': 150, 'maxDepth': 10, 'minInstancesPerNode': 5}
+GBT_PARAMS = {'maxIter': 50, 'maxDepth': 5, 'stepSize': 0.1, 'subsamplingRate': 0.8}
+RF_REGRESSION_PARAMS = {'numTrees': 50, 'maxDepth': 8, 'minInstancesPerNode': 2}
+RF_CLASSIFICATION_PARAMS = {'numTrees': 50, 'maxDepth': 8, 'minInstancesPerNode': 2}
 
+# Mapping Feature -> Algorithm
 MODEL_SELECTION = {
-    'temp_celsius': 'GBT',
-    'humidity_pct': 'GBT',
-    'pressure_hpa': 'GBT',
-    'wind_speed_kmh': 'RandomForest',
+    'temperature': 'GBT',
+    'humidity': 'GBT',
+    'pressure': 'GBT',
+    'wind_speed': 'RandomForest',
     'precipitation_mm': 'RandomForest',
-    'weather_condition': 'RandomForestClassifier'
+    'weather_desc': 'RandomForestClassifier'
 }
 
 # ========================================
-# OUTPUT CONFIGURATION
+# 4. LOCAL OUTPUT
 # ========================================
-# Lưu ý: Trong Pod K8s, các folder này là tạm thời (Ephemeral)
-LOCAL_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "forecasts")
-LOCAL_MODEL_DIR = os.path.join(os.path.dirname(__file__), "saved_models")
-LOCAL_PLOTS_DIR = os.path.join(LOCAL_OUTPUT_DIR, "plots")
-
-for directory in [LOCAL_OUTPUT_DIR, LOCAL_MODEL_DIR, LOCAL_PLOTS_DIR]:
-    os.makedirs(directory, exist_ok=True)
+LOCAL_OUTPUT_DIR = "./output"
+LOCAL_MODEL_DIR = "./models_output"
+LOCAL_PLOTS_DIR = "./plots_output"
 
 # ========================================
-# DATA QUALITY & LOGGING
+# 5. DATA QUALITY
 # ========================================
-MIN_TRAINING_RECORDS = 100
-MIN_DAYS_HISTORY = 14
-MAX_MISSING_PCT = 0.1
-LOG_LEVEL = "INFO"
+MIN_TRAINING_RECORDS = 50 # Giảm xuống để dễ test
+MIN_DAYS_HISTORY = 1
+MAX_MISSING_PCT = 0.2
 
 def print_config():
     """Print current configuration"""
-    print("\n" + "="*80)
-    print("⚙️  WEATHER FORECASTING ML - K8S CONFIGURATION")
-    print("="*80)
-    print(f"MinIO Endpoint:       {MINIO_ENDPOINT}")
-    print(f"Input Path:           {MINIO_INPUT_PATH}")
-    print(f"PostgreSQL:           {POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}")
-    print(f"  Table:              {POSTGRES_TABLE}")
-    print(f"Forecast Horizon:     {FORECAST_HORIZON_HOURS} hours")
-    print(f"Local Output:         {LOCAL_OUTPUT_DIR} (Temporary in Pod)")
-    print("="*80 + "\n")
+    print("\n" + "="*60)
+    print("⚙️  CONFIGURATION LOADED")
+    print("="*60)
+    print(f"MinIO:        {MINIO_ENDPOINT} (Bucket: {MINIO_BUCKET})")
+    print(f"Postgres:     {POSTGRES_HOST}:{POSTGRES_PORT} (DB: {POSTGRES_DB})")
+    print(f"Features:     {CONTINUOUS_FEATURES}")
+    print("="*60 + "\n")
 
 if __name__ == "__main__":
     print_config()
