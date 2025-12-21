@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-cluster-master  
+spec:
+  ports:
+    - port: 7077
+      name: spark
+      targetPort: 7077
+    - port: 8080
+      name: webui
+      targetPort: 8080
+  selector:
+    app: spark-cluster-master
+  type: ClusterIP
+
+---
+# --- SPARK MASTER DEPLOYMENT ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-cluster-master 
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-cluster-master
+  template:
+    metadata:
+      labels:
+        app: spark-cluster-master
+    spec:
+      containers:
+        - name: spark-cluster-master
+          image: weather-etl-app:v3
+          imagePullPolicy: Never
+          command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+          # Explicitly set port args just in case
+          args: ["--port", "7077", "--webui-port", "8080"]
+          ports:
+            - containerPort: 7077
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+
+---
+# --- SPARK WORKER DEPLOYMENT ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spark-worker
+  template:
+    metadata:
+      labels:
+        app: spark-worker
+    spec:
+      containers:
+        - name: spark-worker
+          image: weather-etl-app:v3
+          imagePullPolicy: Never
+          command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker"]
+          args: ["spark://spark-cluster-master:7077", "--webui-port", "8081"] 
+          env:
+            - name: SPARK_WORKER_CORES
+              value: "1"
+            - name: SPARK_WORKER_MEMORY
+              value: "1g"
+          ports:
+            - containerPort: 8081
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"

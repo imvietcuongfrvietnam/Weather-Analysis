@@ -1,0 +1,16 @@
+# --- DATA PROCESSING ---
+numpy>=1.23.0
+pandas>=2.0.0
+# pyspark: KHÔNG CẦN cài ở đây vì Base Image đã có sẵn
+
+# --- CONNECTORS (QUAN TRỌNG) ---
+kafka-python>=2.0.2
+redis>=5.0.0
+minio>=7.1.0
+psycopg2-binary>=2.9.0
+python-dotenv>=1.0.0
+
+# --- ML SUPPORT ---
+# Chỉ cần scikit-learn nhẹ nhàng hỗ trợ xử lý mảng
+scikit-learn>=1.3.0
+# Bỏ tensorflow vì không dùng đến
