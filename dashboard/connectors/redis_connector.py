@@ -5,9 +5,25 @@ Kết nối và lấy dữ liệu real-time từ Redis
 
 import redis
 import json
-from datetime import datetime
+import sys
+import os
 from typing import Dict, Optional, List
-import config
+
+# --- SETUP IMPORT CONFIG ---
+# Thêm thư mục cha (dashboard/) vào sys.path để import config.py
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    import config
+except ImportError:
+    # Fallback nếu chạy trực tiếp file này mà không qua app.py
+    class Config:
+        REDIS_HOST = "localhost"
+        REDIS_PORT = 6379
+        REDIS_DB = 0
+        REDIS_PASSWORD = None
+        REDIS_KEY_PREFIX = "weather:current"
+    config = Config()
 
 class RedisConnector:
     """Connect to Redis and fetch real-time weather data"""
@@ -21,12 +37,7 @@ class RedisConnector:
         self.client = None
         
     def connect(self) -> bool:
-        """
-        Connect to Redis server
-        
-        Returns:
-            bool: True if connected successfully
-        """
+        """Connect to Redis server"""
         try:
             self.client = redis.Redis(
                 host=self.host,
@@ -37,168 +48,56 @@ class RedisConnector:
                 socket_timeout=5,
                 socket_connect_timeout=5
             )
-            
-            # Test connection
             self.client.ping()
             return True
-            
-        except redis.ConnectionError as e:
-            print(f"❌ Redis connection error: {e}")
-            return False
         except Exception as e:
-            print(f"❌ Unexpected error connecting to Redis: {e}")
+            print(f"❌ Redis connection error: {e}")
             return False
     
     def get_current_weather(self, city: str = None) -> Optional[Dict]:
-        """
-        Get current weather data for a city
-        
-        Args:
-            city: City name (optional, uses all if None)
-            
-        Returns:
-            Dict with weather data or None if not found
-        """
-        if not self.client:
-            if not self.connect():
-                return None
+        """Get current weather data for a city"""
+        if not self.client and not self.connect():
+            return None
         
         try:
-            # If city specified, get specific key
             if city:
                 key = f"{self.key_prefix}:{city}"
                 data = self.client.get(key)
-                
-                if data:
-                    return json.loads(data)
-                else:
-                    return None
+                return json.loads(data) if data else None
             
-            # Otherwise get all weather data
+            # Get all
             pattern = f"{self.key_prefix}:*"
             keys = self.client.keys(pattern)
+            if not keys: return None
             
-            if not keys:
-                return None
-            
-            # Get the first available city's data
+            # Demo: lấy cái đầu tiên
             data = self.client.get(keys[0])
-            if data:
-                return json.loads(data)
+            return json.loads(data) if data else None
             
-            return None
-            
-        except redis.RedisError as e:
-            print(f"❌ Redis error: {e}")
-            return None
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON decode error: {e}")
-            return None
         except Exception as e:
-            print(f"❌ Error fetching data: {e}")
+            print(f"❌ Redis error: {e}")
             return None
     
     def get_all_cities(self) -> List[str]:
-        """
-        Get list of all cities in Redis
-        
-        Returns:
-            List of city names
-        """
-        if not self.client:
-            if not self.connect():
-                return []
-        
+        """Get list of all cities in Redis"""
+        if not self.client and not self.connect():
+            return []
         try:
             pattern = f"{self.key_prefix}:*"
             keys = self.client.keys(pattern)
-            
-            # Extract city names from keys
             cities = [key.split(":")[-1] for key in keys]
             return sorted(cities)
-            
-        except Exception as e:
-            print(f"❌ Error getting cities: {e}")
+        except Exception:
             return []
-    
-    def get_weather_history(self, city: str, hours: int = 1) -> List[Dict]:
-        """
-        Get weather history for the last N hours
-        (This assumes Redis stores timestamped data or uses sorted sets)
-        
-        Args:
-            city: City name
-            hours: Number of hours of history
-            
-        Returns:
-            List of weather data points
-        """
-        # Note: This implementation assumes data is stored with timestamps
-        # Adjust based on actual Redis data structure
-        if not self.client:
-            if not self.connect():
-                return []
-        
-        try:
-            # For demo, we'll return current data only
-            # In production, implement proper time-series storage
-            current = self.get_current_weather(city)
-            if current:
-                return [current]
-            return []
-            
-        except Exception as e:
-            print(f"❌ Error getting history: {e}")
-            return []
-    
-    def is_connected(self) -> bool:
-        """
-        Check if Redis is connected
-        
-        Returns:
-            bool: True if connected
-        """
-        if not self.client:
-            return False
-        
-        try:
-            self.client.ping()
-            return True
-        except:
-            return False
-    
     def close(self):
         """Close Redis connection"""
         if self.client:
             self.client.close()
-
-
-def test_connection():
-    """Test Redis connection"""
-    print("🧪 Testing Redis connection...")
-    
-    connector = RedisConnector()
-    
-    if connector.connect():
-        print("✅ Connected to Redis!")
-        
-        # Get current weather
-        weather = connector.get_current_weather()
-        if weather:
-            print(f"✅ Got weather data: {weather}")
-        else:
-            print("⚠️  No weather data in Redis yet")
-        
-        # Get cities
-        cities = connector.get_all_cities()
-        print(f"📍 Cities in Redis: {cities}")
-        
-        connector.close()
-    else:
-        print("❌ Could not connect to Redis")
-        print("💡 Make sure Redis server is running:")
-        print("   docker run -d -p 6379:6379 redis:latest")
-
-
 if __name__ == "__main__":
-    test_connection()
+    print(f"🧪 Testing Redis connection to {config.REDIS_HOST}:{config.REDIS_PORT}...")
+    connector = RedisConnector()
+    if connector.connect():
+        print("✅ Connected!")
+        print("Cities:", connector.get_all_cities())
+    else:
+        print("❌ Failed.")
