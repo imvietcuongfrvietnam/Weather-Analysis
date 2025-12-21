@@ -4,24 +4,30 @@ import csv
 import os
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
-# --- THÊM IMPORT NÀY ---
-from datetime import datetime 
+from datetime import datetime
+from dotenv import load_dotenv
 
-# --- CẤU HÌNH ---
-BOOTSTRAP_SERVERS = ['localhost:9094'] 
-TOPIC_NAME = 'weather'
-DATA_FILE = '../data/data_weather.csv' 
+# --- 1. LOAD CẤU HÌNH TỪ .ENV TẠI CHỖ ---
+# Tải các biến môi trường từ file .env nằm cùng thư mục với script này
+load_dotenv() 
+
+# Đọc cấu hình (Sửa lỗi đặt tên biến không đồng nhất)
+KAFKA_SERVER = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9094')
+TOPIC_NAME = os.getenv('KAFKA_TOPIC_WEATHER', 'weather')
+DATA_FILE = os.getenv('DATA_FILE_DIR', '../data/data_weather.csv')
 DELAY_SECONDS = 0.5 
 
-# --- KHỞI TẠO PRODUCER ---
+# --- 2. KHỞI TẠO PRODUCER ---
 try:
     producer = KafkaProducer(
-        bootstrap_servers=BOOTSTRAP_SERVERS,
+        # Đã sửa: Truyền đúng biến KAFKA_SERVER vừa lấy từ os.getenv
+        bootstrap_servers=[KAFKA_SERVER], 
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
         key_serializer=lambda k: k.encode('utf-8') if k else None,
         request_timeout_ms=10000 
     )
-    print(f"✅ Đã kết nối tới Kafka tại: {BOOTSTRAP_SERVERS}")
+    print(f"✅ Đã kết nối tới Kafka tại: {KAFKA_SERVER}")
+    print(f"📡 Topic: {TOPIC_NAME}")
 except Exception as e:
     print(f"❌ Lỗi kết nối Kafka: {e}")
     exit(1)
@@ -34,10 +40,11 @@ def safe_float(value):
 
 def run_producer():
     print(f"🚀 BẮT ĐẦU STREAMING TỪ FILE: {DATA_FILE}")
-    print(f"🕒 Chế độ: Giả lập Real-time (Thay đổi năm 2012 -> Hiện tại)")
     
+    # Kiểm tra file dữ liệu
     if not os.path.exists(DATA_FILE):
-        print(f"❌ Lỗi: Không tìm thấy file {DATA_FILE}. Hãy chạy script preprocess trước!")
+        print(f"❌ Lỗi: Không tìm thấy file {DATA_FILE}.")
+        print(f"📍 Bạn đang chạy script từ: {os.getcwd()}")
         return
 
     try:
@@ -46,12 +53,10 @@ def run_producer():
             
             count = 0
             for row in reader:
-                # Lấy thời gian hiện tại để dashboard hiển thị được
                 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # 1. Chuẩn hóa dữ liệu
+                # Chuẩn hóa dữ liệu gửi đi
                 message = {
-                    # SỬA Ở ĐÂY: Dùng current_time thay vì row['datetime'] cũ
                     "datetime": current_time, 
                     "City": row['City'],
                     "temperature": safe_float(row['temperature']),
@@ -62,15 +67,13 @@ def run_producer():
                     "wind_speed": safe_float(row['wind_speed'])
                 }
 
-                # key là City để chia partition
+                # Gửi lên Kafka
                 future = producer.send(TOPIC_NAME, key=message['City'], value=message)
                 
                 try:
                     record_metadata = future.get(timeout=10)
-                    
                     count += 1
-                    print(f"[{count}] ✅ Đã gửi: {message['datetime']} | {message['City']} | "
-                          f"Temp: {message['temperature']} | Offset: {record_metadata.offset}")
+                    print(f"[{count}] ✅ Đã gửi: {message['City']} | Temp: {message['temperature']} | Offset: {record_metadata.offset}")
                 
                 except KafkaError as e:
                     print(f"❌ Gửi thất bại dòng {count}: {e}")
