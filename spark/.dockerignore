@@ -18,7 +18,7 @@ work/
 warehouse/
 spark-warehouse/
 checkpoint/
-
+tests/
 # --- FILE NOTEBOOK & TÀI LIỆU ---
 *.ipynb
 *.ipynb_checkpoints

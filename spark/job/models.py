@@ -1,6 +1,7 @@
 """
 Models - ML Models for Weather Forecasting
 Các mô hình ML cho dự đoán từng đặc trưng thời tiết
+Updated: Fix 'NoSuchElementException' in IndexToString by explicitly setting labels after training
 """
 
 from pyspark.ml.feature import VectorAssembler, StandardScaler, StringIndexer, IndexToString
@@ -36,21 +37,20 @@ class WeatherForecastModels:
     def build_regression_model(self, target_feature: str, feature_cols: list, model_type: str = "GBT"):
         """
         Xây dựng Pipeline cho bài toán hồi quy (Dự đoán số)
+        
         """
         print(f"\n🤖 Building {model_type} model for {target_feature}...")
         
-        # Tạo tên cột feature riêng biệt để tránh xung đột khi chạy nhiều model
+        # Unique column names
         features_raw_col = f"features_raw_{target_feature}"
         features_scaled_col = f"features_{target_feature}"
         
-        # 1. Gom các cột features thành 1 vector
         assembler = VectorAssembler(
             inputCols=feature_cols,
             outputCol=features_raw_col,
             handleInvalid="skip" 
         )
         
-        # 2. Chuẩn hóa dữ liệu
         scaler = StandardScaler(
             inputCol=features_raw_col,
             outputCol=features_scaled_col,
@@ -58,7 +58,6 @@ class WeatherForecastModels:
             withMean=True
         )
         
-        # 3. Chọn thuật toán
         prediction_col = f"prediction_{target_feature}"
         
         if model_type == "GBT":
@@ -87,13 +86,17 @@ class WeatherForecastModels:
     def build_classification_model(self, target_feature: str, feature_cols: list):
         """
         Xây dựng Pipeline cho bài toán phân loại (Dự đoán Category)
+        
+
+[Image of Classification Pipeline]
+
         """
         print(f"\n🏷️  Building classifier for {target_feature}...")
-        
+
         features_raw_col = f"features_raw_{target_feature}"
         features_scaled_col = f"features_{target_feature}"
         
-        # 1. String Indexer
+        # 1. String Indexer (Biến chữ thành số)
         label_indexer = StringIndexer(
             inputCol=target_feature,
             outputCol="label", 
@@ -125,13 +128,10 @@ class WeatherForecastModels:
             seed=config.RANDOM_SEED
         )
         
-        # 5. IndexToString
-        label_converter = IndexToString(
-            inputCol="prediction_indexed",
-            outputCol=f"prediction_{target_feature}"
-        )
+        # QUAN TRỌNG: Không thêm IndexToString ở đây.
+        # Chúng ta sẽ thêm nó thủ công sau khi train xong để đảm bảo có labels.
         
-        pipeline = Pipeline(stages=[label_indexer, assembler, scaler, classifier, label_converter])
+        pipeline = Pipeline(stages=[label_indexer, assembler, scaler, classifier])
         return pipeline
     
     def build_all_models(self, feature_cols: list):
@@ -181,15 +181,46 @@ class WeatherForecastModels:
                 # Chỉ train trên các dòng có dữ liệu label
                 train_data = train_df.filter(train_df[target_feature].isNotNull())
                 
-                # Fit model
+                if train_data.count() == 0:
+                     print(f"   ⚠️ Skipping {target_feature}: No valid training data.")
+                     continue
+
+                # Fit model (Train)
                 model = pipeline.fit(train_data)
+                
+                # --- LOGIC XỬ LÝ RIÊNG CHO CLASSIFICATION ---
+                # Nếu là biến phân loại, ta cần thêm bước IndexToString với labels cụ thể
+                if hasattr(config, 'CATEGORICAL_FEATURES') and target_feature in config.CATEGORICAL_FEATURES:
+                    print(f"   ℹ️  Post-processing classification model for {target_feature}...")
+                    
+                    # Lấy Stage StringIndexerModel (thường là cái đầu tiên - index 0)
+                    # Pipeline: [StringIndexer, Assembler, Scaler, Classifier]
+                    string_indexer_model = model.stages[0]
+                    
+                    # Lấy danh sách nhãn đã học được (VD: ['Rain', 'Clouds', 'Clear'])
+                    learned_labels = string_indexer_model.labels
+                    print(f"      Labels found: {learned_labels}")
+                    
+                    # Tạo IndexToString thủ công với labels này
+                    label_converter = IndexToString(
+                        inputCol="prediction_indexed",
+                        outputCol=f"prediction_{target_feature}",
+                        labels=learned_labels # <--- CHÌA KHÓA LÀ ĐÂY
+                    )
+                    
+                    # Tạo PipelineModel mới bao gồm cả IndexToString
+                    new_stages = model.stages + [label_converter]
+                    model = PipelineModel(new_stages)
+                # ----------------------------------------------
+
                 trained_models[target_feature] = model
                 print(f"   ✅ Training complete for {target_feature}")
                 
             except Exception as e:
                 print(f"   ❌ Error training {target_feature}: {e}")
-                import traceback
-                traceback.print_exc()
+                # Import traceback để debug nếu cần
+                # import traceback
+                # traceback.print_exc()
         
         return trained_models
     
