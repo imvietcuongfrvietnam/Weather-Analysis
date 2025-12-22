@@ -21,7 +21,11 @@ except ImportError:
     # Fallback Config
     class Config:
         LOCAL_PLOTS_DIR = "./plots_output"
-        CONTINUOUS_FEATURES = ["temperature", "humidity", "pressure", "wind_speed", "precipitation_mm"]
+        CONTINUOUS_FEATURES = ["temperature", 
+        "humidity", 
+        "pressure", 
+        "wind_speed", 
+        "wind_direction"]
         CATEGORICAL_FEATURES = ["weather_desc"]
     config = Config()
 

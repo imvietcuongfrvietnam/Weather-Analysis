@@ -18,7 +18,11 @@ try:
 except ImportError:
     # Fallback config
     class Config:
-        CONTINUOUS_FEATURES = ["temperature", "humidity", "pressure", "wind_speed", "precipitation_mm"]
+        CONTINUOUS_FEATURES = ["temperature", 
+        "humidity", 
+        "pressure", 
+        "wind_speed", 
+        "wind_direction"]
         CATEGORICAL_FEATURES = ["weather_desc"]
     config = Config()
 

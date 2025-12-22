@@ -24,10 +24,11 @@ except ImportError:
         
         # Các cột mục tiêu quan trọng
         ALL_TARGET_FEATURES = [
-            "temperature", 
-            "humidity", 
-            "pressure", 
-            "wind_speed"
+        "temperature", 
+        "humidity", 
+        "pressure", 
+        "wind_speed", 
+        "wind_direction"
         ]
         
         # Các cột số liên tục

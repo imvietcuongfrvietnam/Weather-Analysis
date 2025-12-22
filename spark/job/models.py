@@ -18,7 +18,11 @@ try:
     import config
 except ImportError:
     class Config:
-        CONTINUOUS_FEATURES = ["temperature", "humidity", "pressure", "wind_speed", "precipitation_mm"]
+        CONTINUOUS_FEATURES = ["temperature", 
+        "humidity", 
+        "pressure", 
+        "wind_speed", 
+        "wind_direction"]
         CATEGORICAL_FEATURES = ["weather_desc"]
         GBT_PARAMS = {'maxIter': 20, 'maxDepth': 5, 'stepSize': 0.1, 'subsamplingRate': 0.8}
         RF_REGRESSION_PARAMS = {'numTrees': 20, 'maxDepth': 5, 'minInstancesPerNode': 2, 'subsamplingRate': 0.8}
