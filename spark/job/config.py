@@ -9,35 +9,36 @@ import os
 # ========================================
 # 1. MINIO CONFIGURATION
 # ========================================
-# K8s Service: "weather-minio", Localhost fallback: "localhost"
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+# SỬA TẠI ĐÂY: Trỏ về namespace default
+MINIO_HOST_FQDN = "weather-minio.default.svc.cluster.local"
+MINIO_PORT = "9000"
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", f"{MINIO_HOST_FQDN}:{MINIO_PORT}")
+
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "password123")
-MINIO_SECURE = False
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "weather-data")
 
-# Paths
-# Input: Lấy từ folder output của main_etl.py
+# Paths - Đảm bảo khớp với output của main_etl.py
 MINIO_INPUT_PATH = f"s3a://{MINIO_BUCKET}/enriched/weather/"
 MINIO_OUTPUT_PATH = f"s3a://{MINIO_BUCKET}/ml/forecasts/"
 MINIO_MODEL_PATH = f"s3a://{MINIO_BUCKET}/ml/models/"
 
-# Spark S3 Configuration (Tên biến phải khớp với spark_ml_job.py)
 SPARK_S3_CONFIG = {
+    # Thêm http:// để Spark hiểu giao thức kết nối
     "spark.hadoop.fs.s3a.endpoint": f"http://{MINIO_ENDPOINT}",
     "spark.hadoop.fs.s3a.access.key": MINIO_ACCESS_KEY,
     "spark.hadoop.fs.s3a.secret.key": MINIO_SECRET_KEY,
     "spark.hadoop.fs.s3a.path.style.access": "true",
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
     "spark.hadoop.fs.s3a.connection.ssl.enabled": "false",
-    "spark.hadoop.fs.s3a.fast.upload": "true"
+    "spark.hadoop.fs.s3a.endpoint.region": "us-east-1" # Tránh lỗi DNS timeout
 }
 
 # ========================================
 # 2. POSTGRESQL CONFIGURATION
 # ========================================
-# K8s Service: "weather-postgres", Localhost fallback: "localhost"
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+# SỬA TẠI ĐÂY: Trỏ về namespace default
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "weather-postgres.default.svc.cluster.local")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "weather_forecast")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
@@ -50,6 +51,7 @@ POSTGRES_PROPERTIES = {
     "password": POSTGRES_PASSWORD,
     "driver": "org.postgresql.Driver"
 }
+
 POSTGRES_WRITE_MODE = "append"
 
 # ========================================

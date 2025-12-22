@@ -36,27 +36,26 @@ with DAG(
         cmds=["/opt/spark/bin/spark-submit"],
         arguments=[
             "--master", "local[*]",
-            # SỬA QUAN TRỌNG: Chuyển Ivy cache sang /tmp để tránh lỗi FileNotFound
             "--conf", "spark.jars.ivy=/tmp/.ivy2",
-            "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0",
+            # CẬP NHẬT: Thêm hadoop-aws và aws-java-sdk-bundle vào đây
+            "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0,org.apache.hadoop:hadoop-aws:3.3.2,com.amazonaws:aws-java-sdk-bundle:1.11.1026",
             "--driver-memory", "800m",
             "--executor-memory", "1g",
             "/app/job/main_etl.py"
         ],
         
         env_vars={
-            "PYTHONPATH": "/app:/app/job:/app/config", 
+            "PYTHONPATH": "/app:/app/job:/app/readers:/app/writers", 
             "PYSPARK_PYTHON": "/usr/bin/python3",
-            "PYSPARK_DRIVER_PYTHON": "/usr/bin/python3",            "KAFKA_BOOTSTRAP_SERVERS": "weather-kafka.default.svc.cluster.local:9092",
+            "PYSPARK_DRIVER_PYTHON": "/usr/bin/python3",
+            "KAFKA_BOOTSTRAP_SERVERS": "weather-kafka.default.svc.cluster.local:9092",
             "MINIO_ENDPOINT": "http://weather-minio.default.svc.cluster.local:9000",
             "MINIO_ACCESS_KEY": "admin",
             "MINIO_SECRET_KEY": "password123",
             "MINIO_BUCKET": "weather-data",
             "REDIS_HOST": "weather-redis.default.svc.cluster.local",
             "REDIS_PORT": "6379",
-            "REDIS_KEY_PREFIX": "weather:current",
-            "PYTHONPATH": "/app"
-        },
+            "REDIS_KEY_PREFIX": "weather:current"        },
         
         container_resources=k8s.V1ResourceRequirements(
             requests={"memory": "1Gi", "cpu": "400m"},

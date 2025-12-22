@@ -4,27 +4,20 @@ import os
 # WEATHER POSTGRESQL CONFIGURATION
 # ===========================
 
-# Tên Service K8s bạn đã đặt trong file YAML (Dùng nội bộ trong cùng namespace default)
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "weather-postgresql")
+# SỬA TẠI ĐÂY: Dùng FQDN để gọi từ namespace 'airflow' sang namespace 'default'
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "weather-postgresql.default.svc.cluster.local")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DATABASE = os.getenv("POSTGRES_DB", "weather_db")
 
-# Thông tin user/pass lấy từ biến môi trường (Khớp chính xác với Deployment YAML)
+# Thông tin user/pass (Đảm bảo khớp với Database bạn đã khởi tạo trong namespace default)
 POSTGRES_USER = os.getenv("POSTGRES_USER", "weather_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "weather_pass")
 
-# Cấu hình Driver và Table nghiệp vụ cho ML
 POSTGRES_DRIVER = "org.postgresql.Driver"
-# Tên bảng này nên khớp với config của Job ML
 FORECAST_TABLE = os.getenv("POSTGRES_TABLE", "weather_predictions")
 
-# JDBC URL cho Spark kết nối nội bộ Cluster
+# JDBC URL sẽ tự động cập nhật theo HOST mới
 POSTGRES_JDBC_URL = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
-
-# ===========================
-# SPARK JDBC CONFIGURATION
-# ===========================
-# Dùng config này trong Spark ML: df.write.format("jdbc").options(**SPARK_POSTGRES_CONFIG)
 
 SPARK_POSTGRES_CONFIG = {
     "url": POSTGRES_JDBC_URL,
@@ -32,34 +25,20 @@ SPARK_POSTGRES_CONFIG = {
     "user": POSTGRES_USER,
     "password": POSTGRES_PASSWORD,
     "dbtable": FORECAST_TABLE,
+    # Thêm tham số này để Spark ML ghi dữ liệu mượt hơn
+    "batchsize": "1000",
+    "reWriteBatchedInserts": "true"
 }
-
-# ===========================
-# HELPER FUNCTIONS
-# ===========================
 
 def print_config():
     """In ra cấu hình hiện tại để debug trên Airflow Logs"""
     print("\n" + "="*80)
-    print("🐘 WEATHER POSTGRESQL CONFIGURATION (DATA WAREHOUSE)")
+    print("🐘 WEATHER POSTGRESQL CONFIGURATION (CROSS-NAMESPACE)")
     print("="*80)
-    print(f"Host:         {POSTGRES_HOST}")
+    print(f"Host FQDN:    {POSTGRES_HOST}")
     print(f"Database:     {POSTGRES_DATABASE}")
-    print(f"User:         {POSTGRES_USER}")
-    print(f"Table:        {FORECAST_TABLE}")
     print(f"JDBC URL:     {POSTGRES_JDBC_URL}")
     print("="*80 + "\n")
 
-def validate_config():
-    """Kiểm tra các biến môi trường bắt buộc"""
-    print("\n🔍 Validating Weather PostgreSQL Configuration...")
-    for var_name, value in [("HOST", POSTGRES_HOST), ("DB", POSTGRES_DATABASE), ("USER", POSTGRES_USER)]:
-        if not value:
-            print(f"   ❌ Missing config: POSTGRES_{var_name}")
-            return False
-    print("   ✅ Configuration looks good for K8s environment!")
-    return True
-
 if __name__ == "__main__":
     print_config()
-    validate_config()
