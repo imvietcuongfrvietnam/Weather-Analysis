@@ -42,7 +42,7 @@ with DAG(
         task_id='init_postgres_table',
         name='init-db-job',
         namespace='airflow',
-        image='weather-etl-app:v3', # Đảm bảo image này có cài psycopg2
+        image='weather-etl-app:v5', # Đảm bảo image này có cài psycopg2
         image_pull_policy='Never',
         cmds=["python3"],
         arguments=["-c", f"""

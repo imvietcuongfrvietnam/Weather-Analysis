@@ -19,7 +19,7 @@ try:
     from feature_engineering import TimeSeriesFeatureEngineer
     from models import WeatherForecastModels
     from forecast_evaluator import ForecastEvaluator
-    from postgres_writer import PostgresWriter  # <--- Đã thêm Import này
+    from postgres_writer import PostgresWriter
 except ImportError as e:
     print(f"❌ Lỗi Import: {e}")
     print("💡 Đảm bảo bạn đang chạy file này từ thư mục spark/job/ hoặc đã setup PYTHONPATH đúng.")
@@ -39,26 +39,34 @@ def create_spark_session():
     print("="*80)
     print("⚡ Initializing Spark Session...")
     
+    # Sử dụng các version đã kiểm chứng hoạt động ổn định
     packages = [
-        "org.apache.hadoop:hadoop-aws:3.3.4",
-        "com.amazonaws:aws-java-sdk-bundle:1.12.262",
-        "org.postgresql:postgresql:42.6.0" # <--- Driver Postgres
+        "org.apache.hadoop:hadoop-aws:3.3.2",
+        "com.amazonaws:aws-java-sdk-bundle:1.11.1026",
+        "org.postgresql:postgresql:42.5.0"
     ]
     
     builder = SparkSession.builder \
         .appName("WeatherForecast_Training") \
         .master("local[*]") \
-        .config("spark.driver.memory", "2g") \
-        .config("spark.executor.memory", "2g") \
+        .config("spark.driver.memory", "1g") \
+        .config("spark.executor.memory", "1g") \
         .config("spark.sql.adaptive.enabled", "true") \
-        .config("spark.jars.packages", ",".join(packages))
-    
-    # Nạp cấu hình MinIO từ file config.py
-    if hasattr(config, 'SPARK_S3_CONFIG'):
-        for key, value in config.SPARK_S3_CONFIG.items():
-            builder = builder.config(key, value)
-    else:
-        print("⚠️  Warning: SPARK_S3_CONFIG not found in config.py")
+        .config("spark.jars.packages", ",".join(packages)) \
+        .config("spark.jars.ivy", "/tmp/.ivy2")
+
+    # =========================================================================
+    # 🛠 FIX CỨNG: CẤU HÌNH MINIO TRỰC TIẾP ĐỂ TRÁNH LỖI DNS (UnknownHostException)
+    # =========================================================================
+    print("🔒 Applying HARDCODED MinIO Configuration...")
+    builder = builder \
+        .config("spark.hadoop.fs.s3a.endpoint", "http://weather-minio.default.svc.cluster.local:9000") \
+        .config("spark.hadoop.fs.s3a.access.key", "admin") \
+        .config("spark.hadoop.fs.s3a.secret.key", "password123") \
+        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+    # =========================================================================
     
     spark = builder.getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
@@ -79,9 +87,17 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
         print("STEP 1: LOADING DATA FROM MINIO")
         print("="*80)
         
+        # Data Loader sẽ sử dụng Spark Session đã có config MinIO chuẩn
         loader = WeatherDataLoader(spark)
+        
+        # Lưu ý: Đảm bảo DataReader của bạn đọc đúng đường dẫn s3a://weather-data/enriched/weather/
         df = loader.load_data(city=city, limit_rows=limit_rows)
         
+        # Kiểm tra xem có dữ liệu không trước khi đi tiếp
+        if df is None or df.rdd.isEmpty():
+            print("❌ ERROR: Dataframe is empty! Please check if Streaming Job has written data to MinIO.")
+            return
+
         # Validate data
         validation = loader.validate_data(df)
         if validation['quality_score'] < 50:
@@ -171,7 +187,6 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
         print("="*80)
 
         # 1. Chọn lọc các cột cần thiết để ghi vào DB
-        # Chúng ta KHÔNG ghi các feature lag/rolling, chỉ ghi: Time, City, Actual, Prediction
         target_cols = list(config.CONTINUOUS_FEATURES) 
         
         if hasattr(config, 'CATEGORICAL_FEATURES'):
@@ -196,24 +211,30 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
             print("   ⚠️ Database update skipped/failed.")
 
         # ==========================================
-        # STEP 8: EXPORT CSV (Local Backup)
+        # STEP 8: EXPORT CSV & VISUALIZATION
         # ==========================================
         if not os.path.exists(LOCAL_OUTPUT_DIR):
             os.makedirs(LOCAL_OUTPUT_DIR)
             
         output_file = os.path.join(LOCAL_OUTPUT_DIR, f"forecast_{datetime.now().strftime('%Y%m%d')}.csv")
-        print(f"\n✅ Pipeline Complete. (Metrics & Models saved)")
-        # 2. Thêm đoạn này trước khi kết thúc
+        print(f"\n✅ Pipeline Complete.")
+        
         print("\n" + "="*80)
         print("STEP 8: VISUALIZATION")
         print("="*80)
 
-        viz = ForecastVisualizer()
-        # Chuyển Spark DataFrame sang Pandas để vẽ (Lưu ý: Chỉ làm khi dữ liệu test nhỏ < 100k dòng)
-        pandas_df = predictions_df.toPandas()
+        try:
+            viz = ForecastVisualizer()
+            # Chuyển Spark DataFrame sang Pandas để vẽ (Chỉ làm khi dữ liệu < 100k dòng)
+            pandas_df = predictions_df.toPandas()
+            
+            # Vẽ biểu đồ Feature Importance & Dự báo
+            viz.plot_all_features(pandas_df)
+            viz.plot_metrics_comparison(metrics)
+            print("   ✅ Visualization charts generated.")
+        except Exception as v_err:
+            print(f"   ⚠️ Visualization failed (Non-critical): {v_err}")
 
-        viz.plot_all_features(pandas_df)
-        viz.plot_metrics_comparison(metrics) # 'metrics' lấy từ bước Evaluator
     except Exception as e:
         print(f"\n❌ Error in pipeline: {e}")
         import traceback

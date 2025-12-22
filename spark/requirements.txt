@@ -17,3 +17,4 @@ scikit-learn>=1.3.0
 # --- UTILS ---
 # Đảm bảo có setuptools để tránh lỗi cài đặt một số thư viện cũ
 setuptools
+matplotlib

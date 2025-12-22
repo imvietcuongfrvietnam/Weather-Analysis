@@ -18,6 +18,7 @@ with DAG(
     schedule_interval='@once', 
     start_date=days_ago(1),
     catchup=False,
+    max_active_runs=1,
     tags=['spark', 'streaming', 'lambda'],
 ) as dag:
 
@@ -25,7 +26,7 @@ with DAG(
         task_id='start_streaming_job',
         name='weather-streaming-job',
         namespace='airflow',
-        image='weather-etl-app:v3',
+        image='weather-etl-app:v5',
         image_pull_policy='Never',
         
         # SỬA QUAN TRỌNG: Chạy quyền Root để có quyền ghi file hệ thống

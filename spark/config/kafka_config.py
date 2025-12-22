@@ -6,7 +6,8 @@ import os
 
 # Ưu tiên lấy từ biến môi trường, nếu không có thì dùng localhost:9094 (cho local)
 # Trong Kubernetes ta sẽ set biến này thành: weather-kafka:9092
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS",     "weather-kafka.default.svc.cluster.local:9092"
+)
 
 KAFKA_TOPICS = {
     "weather": "weather" 
