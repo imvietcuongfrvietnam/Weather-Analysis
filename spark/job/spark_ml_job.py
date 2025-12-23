@@ -1,11 +1,12 @@
 """
-Weather Forecasting - Main Pipeline (Simplified)
-Phiên bản gọn nhẹ: Chỉ Train Model -> Evaluate -> Vẽ biểu đồ.
-Bỏ qua phần dự báo tương lai và ghi DB để tránh lỗi conflict schema.
+Weather Forecasting - Main Pipeline (Final Version)
+- Train & Evaluate Model
+- Ghi kết quả vào PostgreSQL (Mode Overwrite)
+- Vẽ biểu đồ (Fix lỗi datetime64)
 """
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, date_add, expr
+from pyspark.sql.functions import col, lit, date_add, expr, current_timestamp
 import sys
 import os
 import argparse
@@ -33,7 +34,7 @@ TRAIN_TEST_SPLIT = 0.8
 
 def create_spark_session():
     print("\n" + "="*80)
-    print("🚀 WEATHER FORECASTING ML SYSTEM (VISUALIZATION MODE)")
+    print("🚀 WEATHER FORECASTING ML SYSTEM")
     print("="*80)
     print("⚡ Initializing Spark Session...")
     
@@ -129,13 +130,52 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
             print(f"   - {target}: RMSE={m.get('rmse', 'N/A'):.4f}, R2={m.get('r2', 'N/A'):.4f}")
 
         # ==========================================
-        # ⏩ SKIP STEP 6.5 & 7 (Future Forecast & DB Write)
+        # STEP 7: WRITE TO POSTGRESQL (ENABLED)
         # ==========================================
-        print("\n⏩ SKIPPING Future Forecast & Database Write to avoid conflicts.")
-        print("   (Code will proceed directly to Visualization)")
+        print("\n" + "="*80)
+        print("STEP 7: WRITING TO POSTGRESQL")
+        print("="*80)
+
+        # 1. Chọn các cột cần thiết để ghi
+        # Danh sách cột mục tiêu (cần đảm bảo khớp với config)
+        target_features = ['temperature', 'humidity', 'pressure', 'wind_speed', 'wind_direction']
+        
+        cols_to_select = ['datetime', 'city']
+        
+        # Thêm cột thực tế (Actual)
+        for f in target_features:
+            if f in predictions_test_df.columns:
+                cols_to_select.append(f)
+        
+        # Thêm cột dự báo (Prediction)
+        for f in target_features:
+            pred_col = f"prediction_{f}"
+            if pred_col in predictions_test_df.columns:
+                cols_to_select.append(pred_col)
+                
+        # Thêm weather_desc nếu có
+        if 'weather_desc' in predictions_test_df.columns:
+            cols_to_select.append('weather_desc')
+        if 'prediction_weather_desc' in predictions_test_df.columns:
+            cols_to_select.append('prediction_weather_desc')
+
+        # Tạo DataFrame cuối cùng để ghi
+        final_db_df = predictions_test_df.select(*cols_to_select) \
+                                         .withColumn("created_at", current_timestamp())
+
+        print(f"   Writing {final_db_df.count()} records to database...")
+        
+        # 2. Gọi Writer (sẽ dùng mode 'overwrite' trong postgres_writer.py)
+        pg_writer = PostgresWriter()
+        success = pg_writer.write_predictions_safe(final_db_df)
+        
+        if success:
+            print("   ✅ Database update complete.")
+        else:
+            print("   ⚠️ Database update skipped/failed.")
 
         # ==========================================
-        # STEP 8: VISUALIZATION (Đã Fix lỗi Datetime)
+        # STEP 8: VISUALIZATION (Fix Datetime)
         # ==========================================
         print("\n" + "="*80)
         print("STEP 8: VISUALIZATION")
@@ -150,22 +190,18 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
             # 1. Convert to Pandas
             pandas_df = predictions_test_df.toPandas()
             
-            # 2. 🛠 FIX LỖI DATETIME64 TẠI ĐÂY
+            # 2. FIX LỖI DATETIME64
             import pandas as pd
             if 'datetime' in pandas_df.columns:
                 pandas_df['datetime'] = pandas_df['datetime'].astype('datetime64[ns]')
             
             # 3. Vẽ biểu đồ
-            print(f"   Generating charts for {len(pandas_df)} records...")
             viz.plot_all_features(pandas_df)
             viz.plot_metrics_comparison(metrics)
             print("   ✅ Visualization charts generated successfully!")
-            print(f"   📂 Check folder: {LOCAL_OUTPUT_DIR} or ./plots_output")
             
         except Exception as v_err:
             print(f"   ⚠️ Visualization failed: {v_err}")
-            import traceback
-            traceback.print_exc()
 
         print(f"\n✅ Pipeline Complete.")
 
