@@ -1,7 +1,33 @@
+"""
+Main Dashboard Application
+Điểm vào chính của ứng dụng Streamlit
+Updated: Safe Config Loading
+"""
+
 import streamlit as st
 import time
 import os
-import config
+import sys
+
+# Setup Path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    import config
+except ImportError:
+    class Config:
+        DASHBOARD_TITLE = "Weather Forecast Dashboard"
+        REDIS_HOST = "weather-redis"
+        POSTGRES_HOST = "weather-postgresql"
+        DASHBOARD_REFRESH_SECONDS = 10
+    config = Config()
+
+# Fallback nếu config thiếu biến
+if not hasattr(config, 'DASHBOARD_TITLE'): config.DASHBOARD_TITLE = "Weather Forecast Dashboard"
+if not hasattr(config, 'REDIS_HOST'): config.REDIS_HOST = "weather-redis"
+if not hasattr(config, 'POSTGRES_HOST'): config.POSTGRES_HOST = "weather-postgresql"
+if not hasattr(config, 'DASHBOARD_REFRESH_SECONDS'): config.DASHBOARD_REFRESH_SECONDS = 10
+
 from components.realtime_tab import show_realtime_tab
 from components.forecast_tab import show_forecast_tab
 
@@ -65,13 +91,18 @@ with st.sidebar:
 tab1, tab2 = st.tabs(["🔥 Real-Time Monitoring", "📊 7-Day ML Forecast"])
 
 with tab1:
-    show_realtime_tab()
+    try:
+        show_realtime_tab()
+    except Exception as e:
+        st.error(f"Error loading Real-time Tab: {e}")
 
 with tab2:
-    show_forecast_tab()
+    try:
+        show_forecast_tab()
+    except Exception as e:
+        st.error(f"Error loading Forecast Tab: {e}")
 
-# --- LOGIC AUTO-REFRESH (FIX FOR TESTING) ---
-# Kiểm tra xem có đang chạy test không để tránh vòng lặp vô hạn
+# --- LOGIC AUTO-REFRESH ---
 IS_TEST_MODE = os.getenv("STREAMLIT_TEST_MODE", "false").lower() == "true"
 
 if auto_refresh and not IS_TEST_MODE:

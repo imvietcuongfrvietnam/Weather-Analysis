@@ -33,7 +33,14 @@ airflow/
 ## ⚙️ Lưu ý cấu hình
 - Đảm bảo các service như Spark, Kafka, MinIO, PostgreSQL đã chạy trước khi kích hoạt DAG.
 - Sửa các đường dẫn, thông số kết nối trong các file job cho phù hợp môi trường thực tế.
+## Cac cau lenh khi khoi chay de day expose Airflow va day cac DAG len web server
 
+### kubectl port-forward svc/airflow-webserver 8085:8080 -n airflow
+### SCHEDULER_POD=$(kubectl get pods -n airflow -l component=scheduler -o jsonpath='{.items[0].metadata.name}')
+
+### kubectl cp airflow/. airflow/$SCHEDULER_POD:/opt/airflow/dags/
+
+echo "✅ Đã copy xong! Hãy đợi 30s rồi F5 lại trình duyệt."
 ## 📝 Ghi chú
 - Có thể mở rộng thêm các DAG cho các tác vụ mới (ví dụ: cảnh báo thiên tai, phân tích lịch sử).
 - Theo dõi log Airflow để kiểm tra tiến trình và xử lý lỗi.

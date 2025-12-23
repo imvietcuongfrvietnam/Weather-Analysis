@@ -1,7 +1,7 @@
 """
 Forecast Evaluator - Metrics and Evaluation for Weather Forecasting
 Đánh giá độ chính xác của các mô hình dự đoán
-Updated: Optimized for Spark ML 3.x
+Updated: Consistent with new Config (Added wind_direction, Removed precipitation)
 """
 
 from pyspark.sql import DataFrame
@@ -16,13 +16,15 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     import config
 except ImportError:
-    # Fallback config
+    # Fallback config (Đã cập nhật khớp với file config.py mới nhất)
     class Config:
-        CONTINUOUS_FEATURES = ["temperature", 
-        "humidity", 
-        "pressure", 
-        "wind_speed", 
-        "wind_direction"]
+        CONTINUOUS_FEATURES = [
+            "temperature", 
+            "humidity", 
+            "pressure", 
+            "wind_speed", 
+            "wind_direction"
+        ]
         CATEGORICAL_FEATURES = ["weather_desc"]
     config = Config()
 
@@ -70,8 +72,8 @@ class ForecastEvaluator:
         )
         metrics['r2'] = r2_evaluator.evaluate(eval_df)
         
-        # 4. MAPE (Mean Absolute Percentage Error) - Tính thủ công vì Spark cũ không có sẵn
-        # MAPE = mean( abs((actual - pred) / actual) ) * 100
+        # 4. MAPE (Mean Absolute Percentage Error)
+        # Công thức: mean( abs((actual - pred) / actual) ) * 100
         # Thêm 0.001 vào mẫu số để tránh chia cho 0
         mape_df = eval_df.withColumn(
             "ape", 
@@ -91,7 +93,7 @@ class ForecastEvaluator:
         """
         # Cột dự đoán (dạng số index)
         prediction_col = f"prediction_{target_feature}"
-        # Cột label thực tế (dạng số index - do StringIndexer tạo ra)
+        # Cột label thực tế (dạng số index - do StringIndexer tạo ra trong pipeline)
         label_col = f"{target_feature}_index"
         
         if prediction_col not in predictions_df.columns or label_col not in predictions_df.columns:
@@ -106,7 +108,7 @@ class ForecastEvaluator:
             
         metrics = {}
         
-        # Helper function để tạo evaluator
+        # Helper function để tạo evaluator nhanh
         def get_evaluator(metric_name):
             return MulticlassClassificationEvaluator(
                 labelCol=label_col,
@@ -136,7 +138,7 @@ class ForecastEvaluator:
         # 1. Evaluate Regression Models
         print("\n🔢 Regression Models:")
         for target in config.CONTINUOUS_FEATURES:
-            # Chỉ đánh giá nếu có cột dự đoán trong DataFrame
+            # Kiểm tra xem có cột dự đoán của target này không (đề phòng trường hợp lỗi training)
             if f"prediction_{target}" in predictions_df.columns:
                 print(f"   Evaluating {target}...")
                 metrics = ForecastEvaluator.evaluate_regression(predictions_df, target)
@@ -145,7 +147,6 @@ class ForecastEvaluator:
                     print(f"      RMSE: {metrics['rmse']:.4f}, R2: {metrics['r2']:.4f}")
         
         # 2. Evaluate Classification Models
-        # (Nếu bạn chưa implement classification thì phần này sẽ skip)
         if hasattr(config, 'CATEGORICAL_FEATURES'):
             print("\n🏷️  Classification Models:")
             for target in config.CATEGORICAL_FEATURES:

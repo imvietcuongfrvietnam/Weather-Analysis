@@ -1,9 +1,11 @@
 """
 Weather Forecasting - Main Pipeline
 Dự đoán thời tiết sử dụng Spark ML và dữ liệu từ MinIO
+Updated: Added Future Forecast Generation (7 Days) & Hardcoded MinIO
 """
 
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, lit, date_add, expr
 import sys
 import os
 import argparse
@@ -74,6 +76,56 @@ def create_spark_session():
     print("✅ Spark Session initialized successfully!")
     return spark
 
+def generate_future_forecast(spark, model_dict, last_known_data, days=7):
+    """
+    Sinh ra dự báo cho 7 ngày tiếp theo dựa trên dữ liệu ngày cuối cùng (Persistence Strategy)
+    """
+    print(f"\n🔮 Generating forecast for next {days} days...")
+    
+    # 1. Lấy dòng dữ liệu cuối cùng làm cơ sở
+    # Sắp xếp giảm dần theo thời gian và lấy 1 dòng đầu tiên
+    last_row = last_known_data.orderBy(col("datetime").desc()).limit(1)
+    
+    if last_row.count() == 0:
+        print("⚠️ No data to generate forecast from.")
+        return None
+
+    future_preds = []
+    
+    # 2. Vòng lặp sinh 7 ngày
+    # Giả định: Các yếu tố đầu vào (features) cho ngày mai tương tự ngày hôm nay (Persistence)
+    # Mô hình sẽ dùng input đó để predict ra output.
+    for i in range(1, days + 1):
+        # Tạo ngày tương lai: last_date + i
+        next_day = last_row.withColumn("datetime", date_add(col("datetime"), i))
+        
+        row_dict = {}
+        # Lấy datetime và city ra để lưu
+        row_dict['datetime'] = next_day.select("datetime").collect()[0][0]
+        row_dict['city'] = next_day.select("city").collect()[0][0]
+        
+        # Dự đoán từng chỉ số bằng các model đã train
+        for target, model in model_dict.items():
+            # Dự đoán
+            pred_df = model.transform(next_day)
+            # Lấy giá trị prediction
+            # Cột output của model thường tên là f"prediction_{target}" hoặc "prediction" tùy config
+            # Trong file models.py ta đã set outputCol=f"prediction_{target}"
+            pred_col_name = f"prediction_{target}"
+            
+            if pred_col_name in pred_df.columns:
+                val = pred_df.select(pred_col_name).collect()[0][0]
+                row_dict[pred_col_name] = val
+            
+        future_preds.append(row_dict)
+        
+    # 3. Tạo DataFrame từ list dự báo
+    if not future_preds:
+        return None
+        
+    future_df = spark.createDataFrame(future_preds)
+    print(f"   ✅ Generated {days} future days.")
+    return future_df
 
 def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_models: bool = True):
     
@@ -87,18 +139,13 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
         print("STEP 1: LOADING DATA FROM MINIO")
         print("="*80)
         
-        # Data Loader sẽ sử dụng Spark Session đã có config MinIO chuẩn
         loader = WeatherDataLoader(spark)
-        
-        # Lưu ý: Đảm bảo DataReader của bạn đọc đúng đường dẫn s3a://weather-data/enriched/weather/
         df = loader.load_data(city=city, limit_rows=limit_rows)
         
-        # Kiểm tra xem có dữ liệu không trước khi đi tiếp
         if df is None or df.rdd.isEmpty():
             print("❌ ERROR: Dataframe is empty! Please check if Streaming Job has written data to MinIO.")
             return
 
-        # Validate data
         validation = loader.validate_data(df)
         if validation['quality_score'] < 50:
             print("⚠️ Data quality too poor. Exiting.")
@@ -126,10 +173,7 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
         print("STEP 3: SPLITTING DATA")
         print("="*80)
         
-        # Xóa dòng null (do lag feature tạo ra)
         df_clean = df_features.dropna()
-        
-        # Split 80/20
         train_df, test_df = df_clean.randomSplit([TRAIN_TEST_SPLIT, 1 - TRAIN_TEST_SPLIT], seed=42)
         
         print(f"Training set:   {train_df.count()} rows")
@@ -147,11 +191,7 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
         print("="*80)
         
         model_builder = WeatherForecastModels()
-        
-        # 1. Build Pipelines
         model_builder.build_all_models(feature_cols)
-        
-        # 2. Train
         trained_models = model_builder.train_all_models(train_df)
         
         if save_models:
@@ -161,23 +201,32 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
             model_builder.save_all_models(trained_models, LOCAL_MODEL_DIR)
         
         # ==========================================
-        # STEP 6: EVALUATE & PREDICT
+        # STEP 6: EVALUATE (Test Set - Historical)
         # ==========================================
         print("\n" + "="*80)
-        print("STEP 6: PREDICTION & EVALUATION")
+        print("STEP 6: EVALUATION (HISTORICAL)")
         print("="*80)
         
-        predictions_df = test_df
-        # Thực hiện dự đoán cho tất cả các target
+        predictions_test_df = test_df
         for target, model in trained_models.items():
-            predictions_df = model.transform(predictions_df)
+            predictions_test_df = model.transform(predictions_test_df)
             
         evaluator = ForecastEvaluator()
-        metrics = evaluator.evaluate_all_models(predictions_df)
+        metrics = evaluator.evaluate_all_models(predictions_test_df)
         
         print("\n📊 Evaluation Summary:")
         for target, m in metrics.items():
             print(f"   - {target}: RMSE={m.get('rmse', 'N/A'):.4f}, R2={m.get('r2', 'N/A'):.4f}")
+
+        # ==========================================
+        # STEP 6.5: GENERATE FUTURE FORECAST (7 DAYS)
+        # ==========================================
+        print("\n" + "="*80)
+        print("STEP 6.5: GENERATING FUTURE FORECAST")
+        print("="*80)
+        
+        # Dùng df_features (toàn bộ dữ liệu) để lấy dòng cuối cùng làm mốc
+        future_forecast_df = generate_future_forecast(spark, trained_models, df_features, days=7)
 
         # ==========================================
         # STEP 7: WRITE TO POSTGRESQL 
@@ -186,24 +235,45 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
         print("STEP 7: WRITING TO POSTGRESQL")
         print("="*80)
 
-        # 1. Chọn lọc các cột cần thiết để ghi vào DB
+        # 1. Xác định cột cần ghi
         target_cols = list(config.CONTINUOUS_FEATURES) 
-        
         if hasattr(config, 'CATEGORICAL_FEATURES'):
             target_cols += config.CATEGORICAL_FEATURES            
         prediction_cols = [f"prediction_{c}" for c in target_cols]
         
-        # Tạo danh sách cột cần select
-        select_cols = ['datetime', 'city'] 
-        select_cols += [c for c in target_cols if c in predictions_df.columns] # Giá trị thực
-        select_cols += [c for c in prediction_cols if c in predictions_df.columns] # Giá trị dự đoán
+        # Cột cơ bản
+        base_cols = ['datetime', 'city']
         
-        print(f"   Selecting {len(select_cols)} columns for database...")
-        export_df = predictions_df.select(select_cols)
+        # --- Xử lý DataFrame Test (Quá khứ) ---
+        # Select: Time + City + Actual + Prediction
+        select_cols_test = base_cols + \
+                           [c for c in target_cols if c in predictions_test_df.columns] + \
+                           [c for c in prediction_cols if c in predictions_test_df.columns]
+        
+        export_test_df = predictions_test_df.select(select_cols_test)
+        
+        # --- Xử lý DataFrame Future (Tương lai) ---
+        # Future DF chỉ có cột Prediction. Ta cần thêm cột Actual (là Null) để union được
+        if future_forecast_df:
+            for col_name in target_cols:
+                # Thêm cột Actual với giá trị Null (vì tương lai chưa xảy ra)
+                future_forecast_df = future_forecast_df.withColumn(col_name, lit(None).cast("double"))
+            
+            # Select đúng thứ tự cột như Test DF
+            # Lưu ý: future_forecast_df có thể thiếu một số cột nếu model không predict ra, cần check
+            valid_future_cols = [c for c in select_cols_test if c in future_forecast_df.columns]
+            export_future_df = future_forecast_df.select(valid_future_cols)
+            
+            # Union: Gộp Quá khứ + Tương lai
+            final_export_df = export_test_df.unionByName(export_future_df, allowMissingColumns=True)
+        else:
+            final_export_df = export_test_df
+
+        print(f"   Writing {final_export_df.count()} records (Historical + Future) to database...")
         
         # 2. Gọi Postgres Writer
         pg_writer = PostgresWriter()
-        success = pg_writer.write_predictions_safe(export_df)
+        success = pg_writer.write_predictions_safe(final_export_df)
         
         if success:
             print("   ✅ Database update complete.")
@@ -216,7 +286,6 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
         if not os.path.exists(LOCAL_OUTPUT_DIR):
             os.makedirs(LOCAL_OUTPUT_DIR)
             
-        output_file = os.path.join(LOCAL_OUTPUT_DIR, f"forecast_{datetime.now().strftime('%Y%m%d')}.csv")
         print(f"\n✅ Pipeline Complete.")
         
         print("\n" + "="*80)
@@ -226,7 +295,7 @@ def run_forecasting_pipeline(city: str = None, limit_rows: int = None, save_mode
         try:
             viz = ForecastVisualizer()
             # Chuyển Spark DataFrame sang Pandas để vẽ (Chỉ làm khi dữ liệu < 100k dòng)
-            pandas_df = predictions_df.toPandas()
+            pandas_df = predictions_test_df.toPandas()
             
             # Vẽ biểu đồ Feature Importance & Dự báo
             viz.plot_all_features(pandas_df)

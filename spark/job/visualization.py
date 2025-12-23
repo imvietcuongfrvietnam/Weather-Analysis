@@ -1,7 +1,7 @@
 """
 Visualization - Plot Weather Forecasts
 Trực quan hóa kết quả dự đoán thời tiết
-Updated: Fix metric keys (R2 -> r2) and Config Import
+Updated: Consistent with new Schema (Wind Direction added, Precip removed)
 """
 
 import matplotlib
@@ -18,14 +18,16 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     import config
 except ImportError:
-    # Fallback Config
+    # Fallback Config (Cập nhật khớp với config.py mới nhất)
     class Config:
         LOCAL_PLOTS_DIR = "./plots_output"
-        CONTINUOUS_FEATURES = ["temperature", 
-        "humidity", 
-        "pressure", 
-        "wind_speed", 
-        "wind_direction"]
+        CONTINUOUS_FEATURES = [
+            "temperature", 
+            "humidity", 
+            "pressure", 
+            "wind_speed", 
+            "wind_direction"
+        ]
         CATEGORICAL_FEATURES = ["weather_desc"]
     config = Config()
 
@@ -38,7 +40,7 @@ class ForecastVisualizer:
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
         
-        # Set style (tùy chỉnh lại để không phụ thuộc seaborn nếu chưa cài)
+        # Set style
         try:
             plt.style.use('seaborn-v0_8-darkgrid')
         except:
@@ -52,12 +54,18 @@ class ForecastVisualizer:
         """
         prediction_col = f"prediction_{target_feature}"
         
+        # Kiểm tra cột có tồn tại không
         if prediction_col not in df_pandas.columns or target_feature not in df_pandas.columns:
+            # print(f"   ⚠️  Skipping plot for {target_feature}: Columns missing")
             return
         
+        # Nếu DataFrame rỗng
+        if df_pandas.empty:
+            return
+
         fig, ax = plt.subplots(figsize=(14, 6))
         
-        # Sắp xếp theo thời gian để vẽ line chart không bị rối
+        # Sắp xếp theo thời gian
         df_sorted = df_pandas.sort_values(by=datetime_col)
         
         # Plot Actual
@@ -70,7 +78,7 @@ class ForecastVisualizer:
         
         # Formatting
         ax.set_ylabel(target_feature.replace('_', ' ').title(), fontsize=12)
-        ax.set_title(f'Forecast: {target_feature}', fontsize=14, fontweight='bold')
+        ax.set_title(f'Forecast Analysis: {target_feature}', fontsize=14, fontweight='bold')
         ax.legend(loc='best', fontsize=10)
         ax.grid(True, alpha=0.3)
         
@@ -92,6 +100,10 @@ class ForecastVisualizer:
         """
         print(f"\n📊 Creating forecast visualizations...")
         
+        if df_pandas is None or df_pandas.empty:
+            print("   ⚠️  No data to visualize.")
+            return
+
         # 1. Continuous Features
         for target in config.CONTINUOUS_FEATURES:
             self.plot_single_feature(df_pandas, target, datetime_col)
@@ -106,7 +118,7 @@ class ForecastVisualizer:
     def plot_categorical_feature(self, df_pandas: pd.DataFrame, target_feature: str,
                                  datetime_col: str = 'datetime'):
         """
-        Vẽ biểu đồ Scatter cho dữ liệu phân loại (VD: Mưa, Nắng)
+        Vẽ biểu đồ Scatter cho dữ liệu phân loại
         """
         prediction_col = f"prediction_{target_feature}"
         
@@ -116,7 +128,6 @@ class ForecastVisualizer:
         fig, ax = plt.subplots(figsize=(14, 6))
         df_sorted = df_pandas.sort_values(by=datetime_col)
         
-        # Convert categories to numeric for plotting
         # Lấy tập hợp tất cả các giá trị (cả thực tế và dự đoán)
         all_cats = pd.concat([df_sorted[target_feature], df_sorted[prediction_col]]).dropna().unique()
         categories = sorted(all_cats)
@@ -135,11 +146,10 @@ class ForecastVisualizer:
         ax.set_yticks(range(len(categories)))
         ax.set_yticklabels(categories)
         
-        ax.set_title(f'Forecast: {target_feature}', fontsize=14, fontweight='bold')
+        ax.set_title(f'Forecast Analysis: {target_feature}', fontsize=14, fontweight='bold')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # Format Date
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
         plt.xticks(rotation=45)
         plt.tight_layout()
@@ -159,7 +169,7 @@ class ForecastVisualizer:
         r2_scores = []
         
         for target in config.CONTINUOUS_FEATURES:
-            # QUAN TRỌNG: Sửa 'R2' thành 'r2' (khớp với forecast_evaluator.py)
+            # Kiểm tra key 'r2' (lowercase) khớp với forecast_evaluator.py
             if target in all_metrics and 'r2' in all_metrics[target]:
                 features.append(target)
                 r2_scores.append(all_metrics[target]['r2'])
@@ -180,7 +190,7 @@ class ForecastVisualizer:
         
         ax.set_ylabel('R² Score (Higher is Better)')
         ax.set_title('Model Accuracy Comparison')
-        ax.set_ylim([0, 1.1])
+        ax.set_ylim([0, 1.1]) # R2 max là 1
         
         # Hiển thị số trên cột
         for bar, score in zip(bars, r2_scores):
@@ -193,11 +203,6 @@ class ForecastVisualizer:
         plt.savefig(filename, dpi=100)
         print(f"   📊 Saved metrics plot: {filename}")
         plt.close()
-    
-    def plot_multi_panel_dashboard(self, df_pandas: pd.DataFrame, datetime_col='datetime'):
-        """Vẽ Dashboard tổng hợp (Optional)"""
-        # Logic tương tự plot_all_features nhưng gộp vào 1 ảnh
-        pass 
 
 if __name__ == "__main__":
     print("Visualization Module Loaded.")

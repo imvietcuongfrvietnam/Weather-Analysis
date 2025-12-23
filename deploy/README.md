@@ -22,10 +22,10 @@ deploy/
 
 ## 🚀 Hướng dẫn sử dụng
 1. Sửa các file YAML cho phù hợp với môi trường (port, volume, biến môi trường).
-2. Khởi động các service bằng Docker Compose:
-   ```powershell
-   docker-compose -f airflow.yaml up -d
-   docker-compose -f kafka.yaml up -d
+2. Khởi động các service bằng Kubenetes:
+minikube start
+
+kubectl apply -f .
    ...
    ```
 3. Kiểm tra trạng thái các service bằng lệnh:

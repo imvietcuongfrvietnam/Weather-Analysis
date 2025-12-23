@@ -1,7 +1,7 @@
 """
 Weather Forecasting ML - Configuration
 Cấu hình cho hệ thống dự đoán thời tiết
-Updated: Standardized Column Names & Service Hosts
+Updated: Removed precipitation_mm, Added wind_direction
 """
 
 import os
@@ -9,7 +9,7 @@ import os
 # ========================================
 # 1. MINIO CONFIGURATION
 # ========================================
-# SỬA TẠI ĐÂY: Trỏ về namespace default
+# Endpoint nội bộ trong Kubernetes
 MINIO_HOST_FQDN = "weather-minio.default.svc.cluster.local"
 MINIO_PORT = "9000"
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", f"{MINIO_HOST_FQDN}:{MINIO_PORT}")
@@ -18,31 +18,30 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "password123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "weather-data")
 
-# Paths - Đảm bảo khớp với output của main_etl.py
+# Paths
 MINIO_INPUT_PATH = f"s3a://{MINIO_BUCKET}/enriched/weather/"
 MINIO_OUTPUT_PATH = f"s3a://{MINIO_BUCKET}/ml/forecasts/"
 MINIO_MODEL_PATH = f"s3a://{MINIO_BUCKET}/ml/models/"
 
 SPARK_S3_CONFIG = {
-    # Thêm http:// để Spark hiểu giao thức kết nối
     "spark.hadoop.fs.s3a.endpoint": f"http://{MINIO_ENDPOINT}",
     "spark.hadoop.fs.s3a.access.key": MINIO_ACCESS_KEY,
     "spark.hadoop.fs.s3a.secret.key": MINIO_SECRET_KEY,
     "spark.hadoop.fs.s3a.path.style.access": "true",
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
     "spark.hadoop.fs.s3a.connection.ssl.enabled": "false",
-    "spark.hadoop.fs.s3a.endpoint.region": "us-east-1" # Tránh lỗi DNS timeout
+    "spark.hadoop.fs.s3a.endpoint.region": "us-east-1"
 }
 
 # ========================================
 # 2. POSTGRESQL CONFIGURATION
 # ========================================
-# SỬA TẠI ĐÂY: Trỏ về namespace default
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "weather-postgres.default.svc.cluster.local")
+# Cập nhật thông tin khớp với PostgresConnector đã chạy thành công
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "weather-postgresql.default.svc.cluster.local")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_DB = os.getenv("POSTGRES_DB", "weather_forecast")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "weather_db")           # Sửa thành weather_db
+POSTGRES_USER = os.getenv("POSTGRES_USER", "weather_user")     # Sửa thành weather_user
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "weather_pass") # Sửa thành weather_pass
 POSTGRES_TABLE = os.getenv("POSTGRES_TABLE", "weather_predictions")
 
 POSTGRES_JDBC_URL = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
@@ -55,22 +54,23 @@ POSTGRES_PROPERTIES = {
 POSTGRES_WRITE_MODE = "append"
 
 # ========================================
-# 3. ML FEATURE CONFIGURATION (QUAN TRỌNG)
+# 3. ML FEATURE CONFIGURATION
 # ========================================
-# Tên cột phải KHỚP CHÍNH XÁC với dữ liệu từ main_etl.py (Normalize Step)
+# Cột input có sẵn: datetime, City, temperature, humidity, pressure, weather_desc, wind_direction, wind_speed
 
-# Các biến liên tục (Số)
+# 1. Các biến liên tục (Số) - Đã xóa precipitation, thêm wind_direction
 CONTINUOUS_FEATURES = [
-    'temperature',      # Cũ: temp_celsius
-    'humidity',         # Cũ: humidity_pct
-    'pressure',         # Cũ: pressure_hpa
-    'wind_speed',       # Cũ: wind_speed_kmh
-    'precipitation_mm'  # Giữ nguyên
+    'temperature',      
+    'humidity',         
+    'pressure',         
+    'wind_speed',       
+    'wind_direction'    # <--- Mới thêm vào
 ]
 
-# Các biến phân loại (Chữ)
-CATEGORICAL_FEATURES = ['weather_desc'] # Cũ: weather_condition
+# 2. Các biến phân loại (Chữ)
+CATEGORICAL_FEATURES = ['weather_desc']
 
+# Tổng hợp (datetime và City được dùng làm Index/Filter chứ không train trực tiếp)
 ALL_TARGET_FEATURES = CONTINUOUS_FEATURES + CATEGORICAL_FEATURES
 
 # Feature Engineering Params
@@ -86,12 +86,13 @@ RF_REGRESSION_PARAMS = {'numTrees': 50, 'maxDepth': 8, 'minInstancesPerNode': 2}
 RF_CLASSIFICATION_PARAMS = {'numTrees': 50, 'maxDepth': 8, 'minInstancesPerNode': 2}
 
 # Mapping Feature -> Algorithm
+# Đã xóa precipitation_mm, thêm wind_direction
 MODEL_SELECTION = {
     'temperature': 'GBT',
     'humidity': 'GBT',
     'pressure': 'GBT',
     'wind_speed': 'RandomForest',
-    'precipitation_mm': 'RandomForest',
+    'wind_direction': 'RandomForest', # <--- Mới thêm
     'weather_desc': 'RandomForestClassifier'
 }
 
@@ -105,7 +106,7 @@ LOCAL_PLOTS_DIR = "./plots_output"
 # ========================================
 # 5. DATA QUALITY
 # ========================================
-MIN_TRAINING_RECORDS = 50 # Giảm xuống để dễ test
+MIN_TRAINING_RECORDS = 50
 MIN_DAYS_HISTORY = 1
 MAX_MISSING_PCT = 0.2
 

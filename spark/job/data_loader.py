@@ -19,16 +19,15 @@ except ImportError:
     class Config:
         MINIO_BUCKET = "weather-data"
         # Đường dẫn tới dữ liệu đầu ra của quá trình Normalization
-        # Lưu ý: folder này do MinIOWriter tạo ra trong main_etl.py
         MINIO_INPUT_PATH = f"s3a://{MINIO_BUCKET}/enriched/weather" 
         
-        # Các cột mục tiêu quan trọng
+        # Các cột mục tiêu quan trọng (Cập nhật mới nhất)
         ALL_TARGET_FEATURES = [
-        "temperature", 
-        "humidity", 
-        "pressure", 
-        "wind_speed", 
-        "wind_direction"
+            "temperature", 
+            "humidity", 
+            "pressure", 
+            "wind_speed", 
+            "wind_direction"
         ]
         
         # Các cột số liên tục
@@ -36,8 +35,8 @@ except ImportError:
         
         # Ngưỡng kiểm tra chất lượng dữ liệu
         MAX_MISSING_PCT = 0.05       # 5%
-        MIN_DAYS_HISTORY = 1         # Tối thiểu 1 ngày (để test)
-        MIN_TRAINING_RECORDS = 100   # Tối thiểu 100 dòng
+        MIN_DAYS_HISTORY = 1         # Tối thiểu 1 ngày
+        MIN_TRAINING_RECORDS = 50    # Tối thiểu 50 dòng
         
     config = Config()
 
@@ -47,7 +46,10 @@ class WeatherDataLoader:
     def __init__(self, spark: SparkSession):
         self.spark = spark
         # Mặc định load từ folder enriched/weather (Nơi MinIOWriter ghi Parquet)
-        self.input_path = config.MINIO_INPUT_PATH
+        if hasattr(config, 'MINIO_INPUT_PATH'):
+            self.input_path = config.MINIO_INPUT_PATH
+        else:
+            self.input_path = "s3a://weather-data/enriched/weather"
         
     def load_data(self, city: str = None, limit_rows: int = None) -> DataFrame:
         """
@@ -75,11 +77,9 @@ class WeatherDataLoader:
             # 3. Chuẩn hóa cột Datetime
             if "datetime" not in df.columns:
                 print("   ⚠️  Column 'datetime' not found! Trying to find alternative...")
-                # Nếu không có datetime, thử tìm cột timestamp khác (tùy logic sinh data)
-                # Nhưng chuẩn của main_etl.py là có cột 'datetime'
                 raise ValueError("Column 'datetime' not found in data!")
             
-            # Ép kiểu sang Timestamp nếu nó đang là String (do JSON/CSV cũ)
+            # Ép kiểu sang Timestamp nếu nó đang là String
             if not isinstance(df.schema["datetime"].dataType, TimestampType):
                 df = df.withColumn("datetime", to_timestamp(col("datetime")))
             
@@ -142,8 +142,6 @@ class WeatherDataLoader:
             if null_pct > config.MAX_MISSING_PCT * 100:
                 print(f"      ⚠️  {feature}: {null_pct:.2f}% missing (High!)")
                 validation_results['quality_score'] -= 5
-            # else:
-            #     print(f"      ✅ {feature}: {null_pct:.2f}% missing")
         
         # 3. Kiểm tra dải dữ liệu (Data Range) - Phát hiện Outliers
         print("   📈 Checking data ranges...")
@@ -151,7 +149,7 @@ class WeatherDataLoader:
         numeric_cols = [f for f in config.CONTINUOUS_FEATURES if f in df.columns]
         
         if numeric_cols:
-            # Tính min/max/mean một lần cho nhanh
+            # Tính min/max một lần cho nhanh
             aggregations = []
             for col_name in numeric_cols:
                 aggregations.append(spark_min(col_name).alias(f"min_{col_name}"))
@@ -186,7 +184,7 @@ class WeatherDataLoader:
             validation_results['quality_score'] -= 30
         
         # Kết luận
-        quality_score = validation_results['quality_score']
+        quality_score = max(0, validation_results['quality_score']) # Không âm
         status = "GOOD" if quality_score >= 80 else ("ACCEPTABLE" if quality_score >= 60 else "POOR")
         print(f"\n   ✅ Data Quality Score: {quality_score:.1f}% - {status}")
         
@@ -195,7 +193,6 @@ class WeatherDataLoader:
     def get_cities(self, df: DataFrame) -> list:
         """Lấy danh sách thành phố có trong dữ liệu"""
         if 'city' in df.columns:
-            # Lấy distinct city, collect về driver (list python)
             return [row.city for row in df.select('city').distinct().collect()]
         return []
     

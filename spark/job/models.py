@@ -17,17 +17,30 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     import config
 except ImportError:
+    # Fallback Config (Đã cập nhật khớp với config.py chính)
     class Config:
-        CONTINUOUS_FEATURES = ["temperature", 
-        "humidity", 
-        "pressure", 
-        "wind_speed", 
-        "wind_direction"]
+        CONTINUOUS_FEATURES = [
+            "temperature", 
+            "humidity", 
+            "pressure", 
+            "wind_speed", 
+            "wind_direction"
+        ]
         CATEGORICAL_FEATURES = ["weather_desc"]
+        
         GBT_PARAMS = {'maxIter': 20, 'maxDepth': 5, 'stepSize': 0.1, 'subsamplingRate': 0.8}
         RF_REGRESSION_PARAMS = {'numTrees': 20, 'maxDepth': 5, 'minInstancesPerNode': 2, 'subsamplingRate': 0.8}
         RF_CLASSIFICATION_PARAMS = {'numTrees': 20, 'maxDepth': 5, 'minInstancesPerNode': 2}
-        MODEL_SELECTION = {}
+        
+        # Mapping thuật toán (Thêm wind_direction)
+        MODEL_SELECTION = {
+            'temperature': 'GBT',
+            'humidity': 'GBT',
+            'pressure': 'GBT',
+            'wind_speed': 'RandomForest',
+            'wind_direction': 'RandomForest',
+            'weather_desc': 'RandomForestClassifier'
+        }
         RANDOM_SEED = 42
     config = Config()
 
@@ -41,7 +54,6 @@ class WeatherForecastModels:
     def build_regression_model(self, target_feature: str, feature_cols: list, model_type: str = "GBT"):
         """
         Xây dựng Pipeline cho bài toán hồi quy (Dự đoán số)
-        
         """
         print(f"\n🤖 Building {model_type} model for {target_feature}...")
         
@@ -90,6 +102,8 @@ class WeatherForecastModels:
     def build_classification_model(self, target_feature: str, feature_cols: list):
         """
         Xây dựng Pipeline cho bài toán phân loại (Dự đoán Category)
+        Pipeline: StringIndexer -> VectorAssembler -> Scaler -> Classifier -> (Post-processing: IndexToString)
+        
         
 
 [Image of Classification Pipeline]
@@ -150,6 +164,7 @@ class WeatherForecastModels:
         
         # Regression Models
         for target in config.CONTINUOUS_FEATURES:
+            # Lấy thuật toán từ Config, mặc định là GBT nếu không thấy
             model_type = config.MODEL_SELECTION.get(target, "GBT")
             models[target] = self.build_regression_model(target, feature_cols, model_type)
         
@@ -182,7 +197,7 @@ class WeatherForecastModels:
         for target_feature, pipeline in self.models.items():
             print(f"\n🚂 Training model for {target_feature}...")
             try:
-                # Chỉ train trên các dòng có dữ liệu label
+                # Chỉ train trên các dòng có dữ liệu label (bỏ Null)
                 train_data = train_df.filter(train_df[target_feature].isNotNull())
                 
                 if train_data.count() == 0:
@@ -198,7 +213,6 @@ class WeatherForecastModels:
                     print(f"   ℹ️  Post-processing classification model for {target_feature}...")
                     
                     # Lấy Stage StringIndexerModel (thường là cái đầu tiên - index 0)
-                    # Pipeline: [StringIndexer, Assembler, Scaler, Classifier]
                     string_indexer_model = model.stages[0]
                     
                     # Lấy danh sách nhãn đã học được (VD: ['Rain', 'Clouds', 'Clear'])
@@ -212,7 +226,7 @@ class WeatherForecastModels:
                         labels=learned_labels # <--- CHÌA KHÓA LÀ ĐÂY
                     )
                     
-                    # Tạo PipelineModel mới bao gồm cả IndexToString
+                    # Tạo PipelineModel mới bao gồm cả IndexToString ở cuối
                     new_stages = model.stages + [label_converter]
                     model = PipelineModel(new_stages)
                 # ----------------------------------------------
@@ -222,9 +236,8 @@ class WeatherForecastModels:
                 
             except Exception as e:
                 print(f"   ❌ Error training {target_feature}: {e}")
-                # Import traceback để debug nếu cần
-                # import traceback
-                # traceback.print_exc()
+                import traceback
+                traceback.print_exc()
         
         return trained_models
     

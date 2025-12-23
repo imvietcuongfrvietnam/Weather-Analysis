@@ -2,11 +2,6 @@ from pyspark.sql import SparkSession
 import sys
 import os
 
-# =============================================================================
-# 🛠 FIX CỨNG: ÉP BUỘC ĐỊA CHỈ KAFKA (Đặt ngay đầu file)
-# =============================================================================
-# Dòng này đảm bảo dù Kubernetes quên truyền biến, Python vẫn tự điền vào.
-# Nó phải nằm TRƯỚC các lệnh import khác.
 os.environ['KAFKA_BOOTSTRAP_SERVERS'] = "weather-kafka.default.svc.cluster.local:9092"
 print(f"🔒 HARDCODED KAFKA ADDRESS: {os.environ['KAFKA_BOOTSTRAP_SERVERS']}")
 # =============================================================================

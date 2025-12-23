@@ -285,5 +285,9 @@ git push heroku main
 ```
 
 ---
+### Cac cau lenh de chay dashboard
+Dam bao da khoi tao dashboard trong minikube
+chay cau lenh sau de expose dashboard giup truy cap tu may client:
+kubectl port-forward svc/weather-dashboard 8501:80 -n default
 
 **Dashboard hoàn chỉnh và sẵn sàng sử dụng! 🚀**

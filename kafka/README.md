@@ -17,7 +17,7 @@ kafka/
 ## 🚀 Hướng dẫn sử dụng
 1. Đảm bảo Kafka đã được khởi động:
    ```powershell
-   docker run -d --name kafka -p 9092:9092 bitnami/kafka:latest
+   kubectl port-forward svc/weather-kafka 9094:9094 -n default
    ```
 2. Chỉnh sửa script `weather_kafka.py` để phù hợp với cấu hình topic và nguồn dữ liệu.
 3. Chạy script để gửi dữ liệu:

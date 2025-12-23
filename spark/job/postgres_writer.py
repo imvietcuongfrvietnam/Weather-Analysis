@@ -1,6 +1,7 @@
 """
 PostgreSQL Writer - Ghi dữ liệu dự đoán vào PostgreSQL
 Save weather forecast predictions to PostgreSQL database
+Updated: Adjusted schema to match current features (No precipitation)
 """
 
 from pyspark.sql import DataFrame
@@ -13,13 +14,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     import config
 except ImportError:
-    # Fallback Config nếu chưa setup xong
+    # Fallback Config (Cập nhật theo thông số đã test thành công)
     class Config:
-        POSTGRES_HOST = "localhost"
+        POSTGRES_HOST = "weather-postgresql.default.svc.cluster.local"
         POSTGRES_PORT = "5432"
-        POSTGRES_DB = "weather_forecast"
-        POSTGRES_USER = "postgres"
-        POSTGRES_PASSWORD = "password"
+        POSTGRES_DB = "weather_db"
+        POSTGRES_USER = "weather_user"
+        POSTGRES_PASSWORD = "weather_pass"
         POSTGRES_TABLE = "weather_predictions"
         POSTGRES_JDBC_URL = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
         POSTGRES_PROPERTIES = {
@@ -60,6 +61,8 @@ class PostgresWriter:
         
         try:
             # Ghi vào PostgreSQL qua JDBC
+            # Spark sẽ tự động tạo bảng nếu chưa có (dựa trên schema của DataFrame)
+            # Tuy nhiên, tốt nhất là bảng nên được tạo trước với schema chuẩn.
             df.write \
                 .jdbc(
                     url=self.jdbc_url,
@@ -68,12 +71,14 @@ class PostgresWriter:
                     properties=self.properties
                 )
             
-            print(f"   ✅ Successfully wrote {df.count()} records to PostgreSQL")
+            # Đếm số dòng (action này trigger việc ghi dữ liệu thực tế)
+            # Lưu ý: df.count() có thể tốn thời gian nếu df chưa cache
+            print(f"   ✅ Successfully wrote records to PostgreSQL")
             return True
             
         except Exception as e:
             print(f"   ⚠️  PostgreSQL Write Failed: {e}")
-            print(f"   💡 Nguyên nhân có thể: Server chưa bật, sai mật khẩu, hoặc Database '{config.POSTGRES_DB}' chưa được tạo.")
+            print(f"   💡 Nguyên nhân có thể: Server chưa bật, sai mật khẩu, lỗi mạng, hoặc Database '{config.POSTGRES_DB}' chưa được tạo.")
             return False
     
     def write_predictions_safe(self, df: DataFrame, table_name: str = None):
@@ -87,7 +92,8 @@ class PostgresWriter:
     
     def create_table_sql(self) -> str:
         """
-        Tạo câu lệnh SQL để tạo bảng (Khớp với Schema chuẩn của dự án)
+        Tạo câu lệnh SQL để tạo bảng (Tham khảo - Dùng để chạy thủ công nếu cần)
+        Lưu ý: Schema này phải khớp với DataFrame đầu ra của ML Job
         """
         sql = f"""
 CREATE TABLE IF NOT EXISTS {self.table} (
@@ -100,22 +106,21 @@ CREATE TABLE IF NOT EXISTS {self.table} (
     humidity DOUBLE PRECISION,
     pressure DOUBLE PRECISION,
     wind_speed DOUBLE PRECISION,
-    precipitation_mm DOUBLE PRECISION,
-    weather_desc VARCHAR(100),
+    wind_direction DOUBLE PRECISION,
     
     -- Predicted values (Dữ liệu dự báo)
     prediction_temperature DOUBLE PRECISION,
     prediction_humidity DOUBLE PRECISION,
     prediction_pressure DOUBLE PRECISION,
     prediction_wind_speed DOUBLE PRECISION,
-    prediction_precipitation_mm DOUBLE PRECISION,
+    prediction_wind_direction DOUBLE PRECISION,
     prediction_weather_desc VARCHAR(100),
     
     -- Metadata
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tạo Index để query nhanh
+-- Tạo Index để query nhanh cho Dashboard
 CREATE INDEX IF NOT EXISTS idx_datetime ON {self.table} (datetime);
 CREATE INDEX IF NOT EXISTS idx_city ON {self.table} (city);
         """
@@ -123,6 +128,6 @@ CREATE INDEX IF NOT EXISTS idx_city ON {self.table} (city);
 
 if __name__ == "__main__":
     writer = PostgresWriter()
-    print("--- SQL CREATE TABLE ---")
+    print("--- SQL CREATE TABLE (REFERENCE) ---")
     print(writer.create_table_sql())
-    print("------------------------")
+    print("------------------------------------")
