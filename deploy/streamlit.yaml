@@ -61,4 +61,4 @@ spec:
   ports:
     - port: 80        # Port ảo của Service
       targetPort: 8501 # Port thật của Streamlit Container
-      nodePort: 30005  # (Tùy chọn) Cố định port truy cập
+      nodePort: 30005  
